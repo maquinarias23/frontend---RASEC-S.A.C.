@@ -839,8 +839,13 @@ export default function VentasVendedor() {
   // Helpers para condiciones de estado
   // =========================================================================
 
+  // CERRADA se incluye a propósito: en envío por agencia el chofer cierra la
+  // venta al dejar el paquete (estado_venta = cerrada) aunque quede saldo por
+  // cobrar (contra-entrega), y el vendedor debe poder registrar ese pago. El
+  // guard saldo_pendiente > 0 acota el permiso: las CERRADAS por retiro en
+  // tienda siempre tienen saldo 0 (exigen pago_completo antes de cerrar).
   const ventaPermitePago = (fila) =>
-    [ESTADO_VENTA.ACTIVA, ESTADO_VENTA.PENDIENTE_APROBACION].includes(fila.estado_venta) &&
+    [ESTADO_VENTA.ACTIVA, ESTADO_VENTA.PENDIENTE_APROBACION, ESTADO_VENTA.CERRADA].includes(fila.estado_venta) &&
     parseFloat(fila.saldo_pendiente) > 0;
 
   const ventaPermiteAjuste = (fila) =>

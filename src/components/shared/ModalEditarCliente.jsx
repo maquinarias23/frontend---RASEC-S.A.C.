@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
+import DialogConfirmacion from '../ui/DialogConfirmacion';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import {
@@ -21,6 +22,9 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
   const [verPass, setVerPass] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [mostrarFiscal, setMostrarFiscal] = useState(false);
+  // Cliente existente detectado por DNI/RUC duplicado, pendiente de confirmar
+  // la vinculación a la cartera del vendedor actual.
+  const [confirmVinc, setConfirmVinc] = useState(null);
 
   // Estado del selector cascada de ubigeo
   const [departamentos, setDepartamentos] = useState([]);
@@ -180,6 +184,31 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
       cerrar();
       onGuardado?.(data);
     } catch (err) {
+      const resp = err.response?.data;
+      // DNI/RUC ya registrado: si el cliente aún no está en la cartera del
+      // vendedor, se ofrece vincularlo en vez de mostrar solo el error.
+      if (err.response?.status === 409 && resp?.requiereConfirmacion && resp?.clienteExistente) {
+        setConfirmVinc(resp.clienteExistente);
+      } else if (err.response?.status === 409 && resp?.yaVinculado) {
+        toast(resp.error || 'Este cliente ya está en tu cartera.', { icon: 'ℹ️' });
+      } else {
+        toast.error(resp?.error || CLIENTE_FORM.errorGenerico);
+      }
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const confirmarVinculacion = async () => {
+    if (!confirmVinc || guardando) return;
+    setGuardando(true);
+    try {
+      const { data } = await api.post(`/clientes/${confirmVinc.id}/vincular`);
+      toast.success(data.mensaje || 'Cliente vinculado a tu cartera.');
+      setConfirmVinc(null);
+      cerrar();
+      onGuardado?.(data);
+    } catch (err) {
       toast.error(err.response?.data?.error || CLIENTE_FORM.errorGenerico);
     } finally {
       setGuardando(false);
@@ -187,6 +216,7 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
   };
 
   return (
+    <>
     <Modal abierto={abierto} cerrar={cerrar} titulo={modoEditar ? CLIENTE_FORM.tituloEditar : CLIENTE_FORM.tituloCrear}>
       <form onSubmit={guardar} className="space-y-4">
         <div>
@@ -411,5 +441,17 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
         </div>
       </form>
     </Modal>
+
+    <DialogConfirmacion
+      abierto={!!confirmVinc}
+      tipo="info"
+      titulo="Cliente ya registrado"
+      mensaje={confirmVinc
+        ? `Ya existe un cliente con ese DNI / RUC: ${confirmVinc.nombre}. ¿Deseas vincularlo a tu cartera?`
+        : ''}
+      onConfirmar={confirmarVinculacion}
+      onCancelar={() => setConfirmVinc(null)}
+    />
+    </>
   );
 }

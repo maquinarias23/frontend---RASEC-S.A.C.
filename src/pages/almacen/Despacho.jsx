@@ -210,6 +210,11 @@ export default function Despacho() {
   const [editandoConductor, setEditandoConductor] = useState(false);
   const [choferPrevioEdicion, setChoferPrevioEdicion] = useState('');
   const [guardandoChofer, setGuardandoChofer] = useState(false);
+  // Conductor externo (app/tercerizado, sin cuenta en el sistema).
+  // Cuando está activo se registran los datos a mano y almacén completa el flujo.
+  const [conductorExterno, setConductorExterno] = useState(false);
+  const [datosExterno, setDatosExterno] = useState({ nombre: '', dni: '', telefono: '' });
+  const externoCompleto = (d) => !!(d.nombre.trim() && d.dni.trim() && d.telefono.trim());
 
   // Bluetooth printer + selector de formato (multi-protocolo)
   const bluetooth = useBluetoothPrinter();
@@ -704,6 +709,9 @@ export default function Despacho() {
     // o venta serializada desde backend (con campos planos cliente_nombre, etc.).
     const dir = venta?.tbl_direcciones_cliente || null;
     const cli = venta?.tbl_clientes || null;
+    // El destinatario cae al propio cliente cuando la venta no tiene dirección
+    // guardada (envío por agencia o entrega sin dirección), para que nombre, DNI
+    // y teléfono no queden en blanco en el rótulo.
     const destinatario_nombre = venta?.destinatario_nombre
       || dir?.nombre_destinatario
       || cli?.nombre
@@ -711,21 +719,28 @@ export default function Despacho() {
       || '';
     const destinatario_dni = venta?.destinatario_dni
       || dir?.dni_destinatario
+      || cli?.dni
+      || venta?.cliente_dni
       || '';
     const destinatario_telefono = venta?.destinatario_telefono
       || dir?.telefono_destinatario
+      || cli?.telefono_principal
+      || venta?.cliente_telefono
       || '';
-    const direccion = venta?.direccion || dir?.direccion || '';
-    const distrito = venta?.distrito || dir?.distrito || '';
-    const departamento = venta?.departamento || dir?.departamento || '';
-    const provincia = venta?.provincia || dir?.provincia_nombre || '';
-    const agencia_shalom = venta?.agencia_shalom || dir?.agencia_shalom_destino || '';
     const direccion_manual = venta?.direccion_manual || '';
+    const direccion = venta?.direccion || dir?.direccion || direccion_manual || '';
+    // Ubigeo/agencia: desde la dirección guardada o, en su defecto, desde las
+    // relaciones de la venta (caso envío por agencia).
+    const distrito = venta?.distrito || dir?.distrito || venta?.tbl_distritos?.nombre || '';
+    const departamento = venta?.departamento || dir?.departamento || venta?.tbl_departamentos?.nombre || '';
+    const provincia = venta?.provincia || dir?.provincia_nombre || venta?.tbl_provincias?.nombre || '';
+    const agencia_shalom = venta?.agencia_shalom || dir?.agencia_shalom_destino || venta?.tbl_transportistas?.nombre || '';
     const referencia = venta?.referencia || dir?.referencia || '';
 
     return {
       codigo: codigoRotulo,
       ventaId: venta?.id,
+      es_externo: chofer?.externo || false,
       remitente_nombre: chofer?.nombres || '',
       remitente_dni: chofer?.dni || '',
       remitente_telefono: chofer?.telefono || '',
@@ -749,16 +764,33 @@ export default function Despacho() {
     const rotuloExistente = (venta.rotulos || []).slice().sort((a, b) => b.id - a.id)[0] || null;
 
     if (rotuloExistente) {
+      const esExterno = !rotuloExistente.chofer_user_id && !!rotuloExistente.chofer_externo_nombre;
       const choferId = rotuloExistente.chofer_user_id ? String(rotuloExistente.chofer_user_id) : '';
       setChoferSeleccionado(choferId);
       setChoferPrevioEdicion(choferId);
-      const chofer = resolverChofer(choferes, rotuloExistente.chofer_user_id);
+      setConductorExterno(esExterno);
+
+      let chofer;
+      if (esExterno) {
+        const ext = {
+          nombre: rotuloExistente.chofer_externo_nombre || '',
+          dni: rotuloExistente.chofer_externo_dni || '',
+          telefono: rotuloExistente.chofer_externo_telefono || '',
+        };
+        setDatosExterno(ext);
+        chofer = { nombres: ext.nombre, dni: ext.dni, telefono: ext.telefono, externo: true };
+      } else {
+        setDatosExterno({ nombre: '', dni: '', telefono: '' });
+        chofer = resolverChofer(choferes, rotuloExistente.chofer_user_id);
+      }
       setRotuloData(construirRotuloData(venta, chofer, rotuloExistente.codigo_rotulo));
       // Si no hay conductor asignado todavía, arranca en modo edición
       setEditandoConductor(!chofer);
     } else {
       setChoferSeleccionado('');
       setChoferPrevioEdicion('');
+      setConductorExterno(false);
+      setDatosExterno({ nombre: '', dni: '', telefono: '' });
       setRotuloData(null);
       setEditandoConductor(false);
     }
@@ -770,13 +802,14 @@ export default function Despacho() {
     // La cobertura puede estar incompleta: el chofer completa en viaje.
     const id = ventaParaRotulo.id;
     try {
-      const { data } = await api.post(`/almacen/${id}/rotulo`, {
-        chofer_user_id: choferSeleccionado || undefined,
-      });
+      const payload = conductorExterno
+        ? { chofer_externo: { nombre: datosExterno.nombre.trim(), dni: datosExterno.dni.trim(), telefono: datosExterno.telefono.trim() } }
+        : { chofer_user_id: choferSeleccionado || undefined };
+      const { data } = await api.post(`/almacen/${id}/rotulo`, payload);
 
       // Priorizar chofer del backend; fallback al catálogo local por consistencia
       const choferBackend = data.chofer
-        ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono }
+        ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono, externo: data.chofer.externo }
         : null;
       const chofer = choferBackend || resolverChofer(choferes, choferSeleccionado);
 
@@ -805,20 +838,43 @@ export default function Despacho() {
     }));
   };
 
+  // Previsualiza en el rótulo los datos del conductor externo mientras se tipean.
+  const previsualizarDatoExterno = (campo, valor) => {
+    setDatosExterno((prev) => {
+      const actualizado = { ...prev, [campo]: valor };
+      if (rotuloData) {
+        setRotuloData((r) => ({
+          ...r,
+          es_externo: true,
+          remitente_nombre: actualizado.nombre,
+          remitente_dni: actualizado.dni,
+          remitente_telefono: actualizado.telefono,
+        }));
+      }
+      return actualizado;
+    });
+  };
+
   // Persiste el cambio de conductor del rótulo existente (PUT /almacen/:id/rotulo).
   const persistirCambioChofer = async () => {
     if (!ventaParaRotulo || guardandoChofer) return;
-    if (!choferSeleccionado) {
+    if (conductorExterno) {
+      if (!externoCompleto(datosExterno)) {
+        toast.error('Complete nombre, DNI y teléfono del conductor externo');
+        return;
+      }
+    } else if (!choferSeleccionado) {
       toast.error('Debe seleccionar un conductor');
       return;
     }
     setGuardandoChofer(true);
     try {
-      const { data } = await api.put(`/almacen/${ventaParaRotulo.id}/rotulo`, {
-        chofer_user_id: choferSeleccionado,
-      });
+      const payload = conductorExterno
+        ? { chofer_externo: { nombre: datosExterno.nombre.trim(), dni: datosExterno.dni.trim(), telefono: datosExterno.telefono.trim() } }
+        : { chofer_user_id: choferSeleccionado };
+      const { data } = await api.put(`/almacen/${ventaParaRotulo.id}/rotulo`, payload);
       const choferBackend = data.chofer
-        ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono }
+        ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono, externo: data.chofer.externo }
         : null;
       const chofer = choferBackend || resolverChofer(choferes, choferSeleccionado);
       setRotuloData(construirRotuloData({ ...data.venta, id: ventaParaRotulo.id }, chofer, data.codigo_rotulo));
@@ -836,17 +892,95 @@ export default function Despacho() {
   // Cancela la edición del conductor y restaura el preview al valor anterior.
   const cancelarEdicionChofer = () => {
     setChoferSeleccionado(choferPrevioEdicion);
-    const chofer = resolverChofer(choferes, choferPrevioEdicion);
-    if (rotuloData) {
-      setRotuloData((prev) => ({
-        ...prev,
-        remitente_nombre: chofer?.nombres || '',
-        remitente_dni: chofer?.dni || '',
-        remitente_telefono: chofer?.telefono || '',
-      }));
+    // Restaura desde rotuloData: conserva el conductor (interno o externo) previo.
+    const eraExterno = rotuloData?.es_externo;
+    setConductorExterno(!!eraExterno);
+    if (eraExterno) {
+      setDatosExterno({
+        nombre: rotuloData?.remitente_nombre || '',
+        dni: rotuloData?.remitente_dni || '',
+        telefono: rotuloData?.remitente_telefono || '',
+      });
+    } else {
+      const chofer = resolverChofer(choferes, choferPrevioEdicion);
+      if (rotuloData) {
+        setRotuloData((prev) => ({
+          ...prev,
+          es_externo: false,
+          remitente_nombre: chofer?.nombres || '',
+          remitente_dni: chofer?.dni || '',
+          remitente_telefono: chofer?.telefono || '',
+        }));
+      }
     }
     setEditandoConductor(false);
   };
+
+  // Alterna entre conductor interno (catálogo) y externo (datos manuales),
+  // limpiando el estado del modo que se abandona y refrescando el preview.
+  const alternarTipoConductor = (esExterno) => {
+    setConductorExterno(esExterno);
+    if (esExterno) {
+      setChoferSeleccionado('');
+      if (rotuloData) {
+        setRotuloData((prev) => ({
+          ...prev, es_externo: true,
+          remitente_nombre: datosExterno.nombre, remitente_dni: datosExterno.dni, remitente_telefono: datosExterno.telefono,
+        }));
+      }
+    } else {
+      if (rotuloData) {
+        setRotuloData((prev) => ({
+          ...prev, es_externo: false,
+          remitente_nombre: '', remitente_dni: '', remitente_telefono: '',
+        }));
+      }
+    }
+  };
+
+  // ¿Hay conductor válido (interno seleccionado o externo completo)?
+  const tieneConductorAsignado = conductorExterno ? externoCompleto(datosExterno) : !!choferSeleccionado;
+
+  // Toggle interno/externo + selector o inputs. Reutilizado en crear y editar.
+  const renderSelectorConductor = (deshabilitado) => (
+    <>
+      <div className="flex gap-4 mb-2 text-xs text-steel-700">
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input type="radio" checked={!conductorExterno} onChange={() => alternarTipoConductor(false)} disabled={deshabilitado} />
+          De la empresa
+        </label>
+        <label className="flex items-center gap-1 cursor-pointer">
+          <input type="radio" checked={conductorExterno} onChange={() => alternarTipoConductor(true)} disabled={deshabilitado} />
+          Externo (app/tercerizado)
+        </label>
+      </div>
+      {conductorExterno ? (
+        <div className="space-y-2">
+          <input className="input-field text-sm" placeholder="Nombre del conductor *" value={datosExterno.nombre}
+            onChange={(e) => previsualizarDatoExterno('nombre', e.target.value)} disabled={deshabilitado} />
+          <input className="input-field text-sm" placeholder="DNI *" value={datosExterno.dni}
+            onChange={(e) => previsualizarDatoExterno('dni', e.target.value)} disabled={deshabilitado} />
+          <input className="input-field text-sm" placeholder="Teléfono *" value={datosExterno.telefono}
+            onChange={(e) => previsualizarDatoExterno('telefono', e.target.value)} disabled={deshabilitado} />
+        </div>
+      ) : (
+        <select className="input-field text-sm" value={choferSeleccionado}
+          onChange={(e) => previsualizarCambioChofer(e.target.value)} disabled={deshabilitado}>
+          <option value="">-- Seleccionar conductor --</option>
+          {choferes.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nombres}{c.dni ? ` (DNI: ${c.dni})` : ''}{c.telefono ? ` — ${TELEFONO_INPUT.format(c.telefono)}` : ''}
+            </option>
+          ))}
+        </select>
+      )}
+      <p className="text-[10px] text-blue-600 mt-1">
+        {conductorExterno
+          ? 'Registre los datos del conductor externo. Almacén completa el envío y la entrega en agencia.'
+          : 'Los datos del conductor se usarán como remitente en el rótulo'}
+      </p>
+    </>
+  );
 
   // Imprime el rótulo actual vía Bluetooth. Devuelve true cuando el hook
   // confirma el envío real; el toast lo muestra el panel BluetoothPrinterPanel.
@@ -1412,7 +1546,7 @@ export default function Despacho() {
       </Modal>
 
       {/* Modal Rótulo Imprimible */}
-      <Modal abierto={modalRotulo} cerrar={() => { setModalRotulo(false); setVentaParaRotulo(null); setEditandoConductor(false); setChoferPrevioEdicion(''); }} titulo={`Rótulo de Venta${ventaParaRotulo ? ` #${ventaParaRotulo.id}` : ''}`} ancho="max-w-lg">
+      <Modal abierto={modalRotulo} cerrar={() => { setModalRotulo(false); setVentaParaRotulo(null); setEditandoConductor(false); setChoferPrevioEdicion(''); setConductorExterno(false); setDatosExterno({ nombre: '', dni: '', telefono: '' }); }} titulo={`Rótulo de Venta${ventaParaRotulo ? ` #${ventaParaRotulo.id}` : ''}`} ancho="max-w-lg">
         <div className="space-y-4">
           {/* Selector de chofer */}
           <div className="bg-blue-50 border-2 border-blue-400 rounded-lg p-3">
@@ -1421,31 +1555,18 @@ export default function Despacho() {
               Conductor (remitente) *
             </label>
 
-            {/* Modo CREAR: aún no existe rótulo → selector + botón Generar */}
-            {!rotuloData && (
-              <>
-                <select
-                  className="input-field text-sm"
-                  value={choferSeleccionado}
-                  onChange={(e) => setChoferSeleccionado(e.target.value)}
-                >
-                  <option value="">-- Seleccionar conductor --</option>
-                  {choferes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombres}{c.dni ? ` (DNI: ${c.dni})` : ''}{c.telefono ? ` — ${TELEFONO_INPUT.format(c.telefono)}` : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-blue-600 mt-1">Los datos del conductor se usarán como remitente en el rótulo</p>
-              </>
-            )}
+            {/* Modo CREAR: aún no existe rótulo → toggle + selector/inputs */}
+            {!rotuloData && renderSelectorConductor(false)}
 
             {/* Modo LECTURA: rótulo ya existe + hay conductor asignado y no se está editando */}
-            {rotuloData && !editandoConductor && choferSeleccionado && (
+            {rotuloData && !editandoConductor && tieneConductorAsignado && (
               <div className="flex items-start justify-between gap-2">
                 <div className="text-xs text-steel-700">
-                  <p className="font-semibold text-steel-800">
+                  <p className="font-semibold text-steel-800 flex items-center gap-2">
                     {rotuloData.remitente_nombre || '-'}
+                    {rotuloData.es_externo && (
+                      <span className="text-[10px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded">Externo</span>
+                    )}
                   </p>
                   <p className="text-steel-600">
                     {rotuloData.remitente_dni ? `DNI: ${rotuloData.remitente_dni}` : 'Sin DNI'}
@@ -1466,28 +1587,15 @@ export default function Despacho() {
             )}
 
             {/* Modo EDICIÓN: rótulo ya existe y el usuario está cambiando el conductor
-                 (o aún no hay conductor asignado) → selector + Guardar/Cancelar */}
-            {rotuloData && (editandoConductor || !choferSeleccionado) && (
+                 (o aún no hay conductor asignado) → toggle + selector/inputs + Guardar/Cancelar */}
+            {rotuloData && (editandoConductor || !tieneConductorAsignado) && (
               <>
-                <select
-                  className="input-field text-sm"
-                  value={choferSeleccionado}
-                  onChange={(e) => previsualizarCambioChofer(e.target.value)}
-                  disabled={guardandoChofer}
-                >
-                  <option value="">-- Seleccionar conductor --</option>
-                  {choferes.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombres}{c.dni ? ` (DNI: ${c.dni})` : ''}{c.telefono ? ` — ${TELEFONO_INPUT.format(c.telefono)}` : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-blue-600 mt-1">Los datos del conductor se usarán como remitente en el rótulo</p>
+                {renderSelectorConductor(guardandoChofer)}
                 <div className="flex gap-2 mt-2">
                   <button
                     type="button"
                     onClick={persistirCambioChofer}
-                    disabled={guardandoChofer || !choferSeleccionado}
+                    disabled={guardandoChofer || !tieneConductorAsignado}
                     className="btn-primary text-xs flex items-center gap-1 disabled:opacity-50"
                   >
                     {guardandoChofer ? (
@@ -1532,7 +1640,7 @@ export default function Despacho() {
           {!rotuloData && (
             <button
               onClick={generarRotulo}
-              disabled={!choferSeleccionado}
+              disabled={!tieneConductorAsignado}
               className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <HiOutlineTag className="w-4 h-4" />
