@@ -7,9 +7,11 @@ import Paginacion from '../../components/ui/Paginacion';
 import Modal from '../../components/ui/Modal';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import ComprobantesBadge from '../../components/shared/ComprobantesBadge';
+import ModalWhatsappComprobante from '../../components/shared/ModalWhatsappComprobante';
+import IconoWhatsapp from '../../components/ui/IconoWhatsapp';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import { comprobantesService } from '../../services/comprobantesService';
-import { TIPO_COMPROBANTE_LABEL, ESTADO_COMPROBANTE } from '../../config/constants';
+import { TIPO_COMPROBANTE_LABEL, ESTADO_COMPROBANTE, COMPROBANTE_NUMERO, WA_COMPROBANTE } from '../../config/constants';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -47,6 +49,7 @@ function TabComprobantes() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filtros, setFiltros] = useState({ tipo_comprobante: '', estado: '', page: 1 });
+  const [modalWhatsapp, setModalWhatsapp] = useState(null);
 
   const cargar = async () => {
     setLoading(true);
@@ -94,11 +97,10 @@ function TabComprobantes() {
     } catch { toast.error('Error al descargar PDF'); }
   };
 
-  const formatearNumero = (serie, numero) => `${serie}-${String(numero).padStart(8, '0')}`;
   const totalPages = Math.ceil(total / 20);
 
   const columnasCPE = [
-    { key: 'numero', label: 'N° Comprobante', render: (c) => <span className="font-mono text-xs">{formatearNumero(c.serie, c.numero)}</span> },
+    { key: 'numero', label: 'N° Comprobante', render: (c) => <span className="font-mono text-xs">{COMPROBANTE_NUMERO.formatear(c.serie, c.numero)}</span> },
     { key: 'tipo_comprobante', label: 'Tipo', render: (c) => <span className="text-xs">{TIPO_COMPROBANTE_LABEL[c.tipo_comprobante]}</span> },
     { key: 'cliente_nombre', label: 'Cliente', render: (c) => <div className="text-xs"><p>{c.cliente_nombre}</p><p className="text-steel-500">{c.cliente_documento}</p></div> },
     { key: 'total', label: 'Total', render: (c) => formatearMoneda(c.total) },
@@ -131,6 +133,11 @@ function TabComprobantes() {
                   <HiOutlineDocumentDownload className="w-4 h-4" />
                 </button>
               )}
+              {!fila.anulado && fila.estado !== ESTADO_COMPROBANTE.ERROR && (
+                <button onClick={() => setModalWhatsapp(fila)} className="p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all" title={WA_COMPROBANTE.btnAccion}>
+                  <IconoWhatsapp className="w-4 h-4" />
+                </button>
+              )}
               {fila.proveedor_external_id && !fila.anulado && (
                 <button onClick={() => handleConsultar(fila)} className="p-1.5 rounded-lg border border-steel-700/40 text-steel-300 hover:text-steel-100 hover:bg-steel-800 transition-all" title="Consultar">
                   <HiOutlineRefresh className="w-4 h-4" />
@@ -154,6 +161,13 @@ function TabComprobantes() {
             onChange={(p) => setFiltros(prev => ({ ...prev, page: p }))} />
         )}
       </div>
+
+      {modalWhatsapp && (
+        <ModalWhatsappComprobante
+          comprobante={modalWhatsapp}
+          cerrar={() => setModalWhatsapp(null)}
+        />
+      )}
     </div>
   );
 }

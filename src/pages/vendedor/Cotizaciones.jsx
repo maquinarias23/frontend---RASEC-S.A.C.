@@ -26,6 +26,7 @@ import Modal from '../../components/ui/Modal';
 import Paginacion from '../../components/ui/Paginacion';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
+import { abrirWhatsapp } from '../../utils/whatsapp';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -365,21 +366,14 @@ export default function Cotizaciones() {
     try {
       const { data } = await api.get(`/cotizaciones-web/${cotizacion.id}/whatsapp`);
 
-      // El backend retorna { mensaje, cotizacion } - construir URL de WhatsApp
+      // El backend retorna { mensaje, cotizacion }; el teléfono se toma del cliente.
       const telefono = cotizacion.tbl_clientes?.telefono_principal || data.cotizacion?.tbl_clientes?.telefono_principal || '';
       const mensaje = data.mensaje || '';
 
-      if (!telefono) {
-        toast.error('El cliente no tiene telefono registrado');
+      if (!abrirWhatsapp(telefono, mensaje)) {
+        toast.error('El cliente no tiene teléfono registrado');
         return;
       }
-
-      // Normalizar a solo dígitos y añadir código de país si falta
-      const telLimpio = TELEFONO_INPUT.toDigits(telefono);
-      const telFinal = telLimpio.startsWith('51') ? telLimpio : `51${telLimpio}`;
-
-      const url = `https://wa.me/${telFinal}?text=${encodeURIComponent(mensaje)}`;
-      window.open(url, '_blank');
       toast.success('Enlace de WhatsApp abierto');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al generar mensaje de WhatsApp');

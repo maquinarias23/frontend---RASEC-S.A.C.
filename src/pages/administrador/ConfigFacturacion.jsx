@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { configFacturacionService } from '../../services/comprobantesService';
-import { TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV } from '../../config/constants';
+import { TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV, COMPROBANTE_NUMERO } from '../../config/constants';
 import toast from 'react-hot-toast';
 import {
   HiOutlineKey, HiOutlinePlusCircle, HiOutlineCheck, HiOutlineX,
@@ -374,7 +374,7 @@ export default function ConfigFacturacion() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">
-                      <span className="num-chromium text-steel-200 font-semibold">{String(s.correlativo_actual).padStart(8, '0')}</span>
+                      <span className="num-chromium text-steel-200 font-semibold">{String(s.correlativo_actual).padStart(COMPROBANTE_NUMERO.LONGITUD_CORRELATIVO, '0')}</span>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <span className={`badge border ${s.activa

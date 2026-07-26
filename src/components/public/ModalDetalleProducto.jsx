@@ -3,7 +3,8 @@ import { HiOutlineX, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineShopp
 import api from '../../api/axios';
 import { buildMediaUrl } from '../../utils/media';
 import { formatearMoneda } from '../../utils/formato';
-import { TIPO_MEDIA, DETALLE_PRODUCTO } from '../../config/constants';
+import { TIPO_MEDIA, DETALLE_PRODUCTO, WA_MENSAJES } from '../../config/constants';
+import { construirUrlWhatsappEmpresa } from '../../utils/whatsapp';
 
 // Fisher-Yates shuffle (no muta el array original)
 function shuffle(arr) {
@@ -14,8 +15,6 @@ function shuffle(arr) {
   }
   return a;
 }
-
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '';
 
 // Carrusel circular de productos relacionados (barajados al azar)
 function RelacionadosCarrusel({ relacionados, onVerProducto }) {
@@ -163,9 +162,7 @@ export default function ModalDetalleProducto({ productoId, onClose, onAgregarCar
   const precio = producto?.precio_catalogo || producto?.precio_venta_base || 0;
 
   const whatsappUrl = producto
-    ? `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
-        `Hola, me interesa el producto: ${producto.nombre} (${formatearMoneda(precio)})`
-      )}`
+    ? construirUrlWhatsappEmpresa(WA_MENSAJES.PRODUCTO(producto.nombre, formatearMoneda(precio)))
     : '#';
 
   if (!productoId) return null;

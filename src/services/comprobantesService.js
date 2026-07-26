@@ -9,6 +9,7 @@ export const comprobantesService = {
   anular: (id, motivo) => api.post(`/comprobantes/${id}/anular`, { motivo }),
   reintentar: (id) => api.post(`/comprobantes/${id}/reintentar`),
   descargarPdf: (id) => api.get(`/comprobantes/${id}/pdf`),
+  mensajeWhatsapp: (id) => api.get(`/comprobantes/${id}/whatsapp`),
 };
 
 export const configFacturacionService = {

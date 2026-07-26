@@ -3,7 +3,7 @@ import Modal from '../ui/Modal';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import {
-  TELEFONO_INPUT, DNI_RUC_INPUT, CLIENTE_FORM,
+  TELEFONO_INPUT, DNI_RUC_INPUT, EMAIL_INPUT, CLIENTE_FORM,
   TIPO_DOCUMENTO_CLIENTE, TIPO_DOCUMENTO_CLIENTE_LABEL,
 } from '../../config/constants';
 import { obtenerDepartamentos, obtenerProvincias, obtenerDistritos } from '../../services/ubigeoService';
@@ -146,13 +146,21 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
       return;
     }
 
+    // Email fiscal: opcional. Vacío se guarda como null y no bloquea el alta;
+    // solo se detiene el envío cuando trae contenido con formato inválido.
+    const emailFiscal = EMAIL_INPUT.normalizar(form.email);
+    if (!EMAIL_INPUT.esValido(emailFiscal)) {
+      toast.error(`${CLIENTE_FORM.labelEmailFiscal}: ${EMAIL_INPUT.MSG_INVALIDO}`);
+      return;
+    }
+
     const body = {
       ...form,
       dni: dniDigits || null,
       ruc: rucDigits || null,
       telefono_principal: telPrincipal,
       telefono_secundario: telSecundario || null,
-      email: form.email?.trim() || null,
+      email: emailFiscal || null,
       direccion_fiscal: form.direccion_fiscal?.trim() || null,
       distrito_fiscal_id: form.distrito_fiscal_id ? parseInt(form.distrito_fiscal_id, 10) : null,
     };
@@ -320,13 +328,20 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-steel-300 mb-1">Email fiscal (envío de CPE)</label>
+                <label className="block text-xs font-medium text-steel-300 mb-1">
+                  {CLIENTE_FORM.labelEmailFiscal}{' '}
+                  <span className="text-steel-500">({CLIENTE_FORM.sufijoOpcional})</span>
+                </label>
+                {/* type="text" a propósito: con type="email" el navegador aborta el
+                    submit sin mensaje propio. La validación vive en guardar(). */}
                 <input
-                  type="email"
+                  type="text"
+                  inputMode={EMAIL_INPUT.INPUT_MODE}
+                  maxLength={EMAIL_INPUT.MAX_LENGTH}
                   className="input-field"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  placeholder="correo@empresa.com"
+                  placeholder={EMAIL_INPUT.PLACEHOLDER}
                 />
               </div>
 

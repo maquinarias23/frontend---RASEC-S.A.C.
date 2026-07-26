@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { comprobantesService, configFacturacionService } from '../../services/comprobantesService';
 import {
   TIPO_COMPROBANTE, TIPO_NOTA_CREDITO, TIPO_NOTA_DEBITO,
-  TIPO_COMPROBANTE_LABEL,
+  TIPO_COMPROBANTE_LABEL, COMPROBANTE_NUMERO,
 } from '../../config/constants';
 import toast from 'react-hot-toast';
 import { HiOutlineX } from 'react-icons/hi';
@@ -52,7 +52,7 @@ export default function ModalEmitirNota({ comprobanteRef, onClose, onSuccess }) 
   }, [form.tipo_comprobante, seriesFiltradas]);
 
   const opcionesNota = form.tipo_comprobante === TIPO_COMPROBANTE.NOTA_CREDITO ? OPCIONES_NC : OPCIONES_ND;
-  const refNumero = `${comprobanteRef.serie}-${String(comprobanteRef.numero).padStart(8, '0')}`;
+  const refNumero = COMPROBANTE_NUMERO.formatear(comprobanteRef.serie, comprobanteRef.numero);
 
   const handleSubmit = async (e) => {
     e.preventDefault();

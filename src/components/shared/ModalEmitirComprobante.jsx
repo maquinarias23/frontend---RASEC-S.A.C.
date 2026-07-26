@@ -3,10 +3,12 @@ import { comprobantesService, configFacturacionService } from '../../services/co
 import {
   TIPO_COMPROBANTE, TIPO_DOCUMENTO_CLIENTE, TIPO_IGV, CONDICION_PAGO_COMPROBANTE,
   TIPO_COMPROBANTE_LABEL, TIPO_DOCUMENTO_CLIENTE_LABEL, MONEDA, FORMATO_PDF,
-  METODOS_PAGO, METODOS_PAGO_LABEL,
+  METODOS_PAGO, METODOS_PAGO_LABEL, ESTADO_COMPROBANTE, COMPROBANTE_NUMERO,
+  COMPROBANTE_EMITIDO, WA_COMPROBANTE,
 } from '../../config/constants';
+import IconoWhatsapp from '../ui/IconoWhatsapp';
 import toast from 'react-hot-toast';
-import { HiOutlineX, HiOutlineExclamationCircle } from 'react-icons/hi';
+import { HiOutlineX, HiOutlineExclamationCircle, HiOutlineCheckCircle } from 'react-icons/hi';
 
 // Mapping para texto descriptivo en observaciones de comprobantes (ej: "en efectivo", "en transferencia")
 const METODO_PAGO_OBSERVACION = Object.fromEntries(
@@ -25,7 +27,7 @@ function generarObservacionesPagos(pagos) {
   }).join('\n');
 }
 
-export default function ModalEmitirComprobante({ venta, comprobantesExistentes = [], onClose, onSuccess }) {
+export default function ModalEmitirComprobante({ venta, comprobantesExistentes = [], onClose, onSuccess, onEnviarWhatsapp }) {
   // Cálculo de facturación acumulada
   const totalVenta = parseFloat(venta?.total || 0);
   const facturadoBruto = comprobantesExistentes
@@ -41,6 +43,9 @@ export default function ModalEmitirComprobante({ venta, comprobantesExistentes =
 
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(false);
+  // Comprobante recién emitido: habilita el envío inmediato al cliente por WhatsApp
+  // sin tener que buscarlo después en la lista.
+  const [emitido, setEmitido] = useState(null);
   const [form, setForm] = useState({
     tipo_comprobante: '',
     serie_id: '',
@@ -97,7 +102,7 @@ export default function ModalEmitirComprobante({ venta, comprobantesExistentes =
 
     setLoading(true);
     try {
-      await comprobantesService.emitir({
+      const { data } = await comprobantesService.emitir({
         sale_order_id: venta.id,
         tipo_comprobante: form.tipo_comprobante,
         serie_id: parseInt(form.serie_id),
@@ -107,13 +112,42 @@ export default function ModalEmitirComprobante({ venta, comprobantesExistentes =
         observaciones: form.observaciones || undefined,
         monto_comprobante: montoComp,
       });
-      toast.success('Comprobante emitido exitosamente');
-      onSuccess();
+      toast.success(COMPROBANTE_EMITIDO.toastExito);
+      // Solo se ofrece el envío cuando el comprobante quedó realmente emitido:
+      // si el proveedor falló (estado error) no hay nada válido que compartir.
+      const puedeEnviarse = Boolean(onEnviarWhatsapp) && data?.id && data.estado !== ESTADO_COMPROBANTE.ERROR;
+      if (puedeEnviarse) setEmitido(data);
+      else onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al emitir comprobante');
     }
     setLoading(false);
   };
+
+  if (emitido) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onSuccess}>
+        <div className="bg-steel-800 rounded-lg border border-steel-600 w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="flex flex-col items-center text-center gap-3">
+            <HiOutlineCheckCircle className="w-12 h-12 text-emerald-400" />
+            <h2 className="text-lg font-semibold text-steel-100">{COMPROBANTE_EMITIDO.titulo}</h2>
+            <p className="text-sm text-steel-300 font-mono tracking-wider">
+              {COMPROBANTE_EMITIDO.detalle(COMPROBANTE_NUMERO.formatear(emitido.serie, emitido.numero))}
+            </p>
+            <p className="text-xs text-steel-400">{COMPROBANTE_EMITIDO.ayudaEnvio}</p>
+          </div>
+          <div className="flex justify-center gap-2 pt-5">
+            <button type="button" onClick={onSuccess} className="btn-secondary">
+              {COMPROBANTE_EMITIDO.btnCerrar}
+            </button>
+            <button type="button" onClick={() => onEnviarWhatsapp(emitido)} className="btn-primary flex items-center gap-2">
+              <IconoWhatsapp className="w-4 h-4" /> {WA_COMPROBANTE.btnAccion}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const itemsVenta = venta?.items_venta?.filter(i => !i.es_regalo) || [];
 

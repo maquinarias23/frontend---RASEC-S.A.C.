@@ -3,7 +3,9 @@ import { comprobantesService } from '../../services/comprobantesService';
 import ComprobantesBadge from './ComprobantesBadge';
 import ModalEmitirComprobante from './ModalEmitirComprobante';
 import ModalEmitirNota from './ModalEmitirNota';
-import { TIPO_COMPROBANTE_LABEL, ESTADO_COMPROBANTE } from '../../config/constants';
+import ModalWhatsappComprobante from './ModalWhatsappComprobante';
+import IconoWhatsapp from '../ui/IconoWhatsapp';
+import { TIPO_COMPROBANTE_LABEL, ESTADO_COMPROBANTE, COMPROBANTE_NUMERO, WA_COMPROBANTE } from '../../config/constants';
 import { HiOutlineDocumentText, HiOutlinePlusCircle, HiOutlineRefresh, HiOutlineXCircle, HiOutlineDocumentDownload } from 'react-icons/hi';
 import toast from 'react-hot-toast';
 
@@ -12,6 +14,7 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
   const [loading, setLoading] = useState(false);
   const [modalEmitir, setModalEmitir] = useState(false);
   const [modalNota, setModalNota] = useState(null);
+  const [modalWhatsapp, setModalWhatsapp] = useState(null);
 
   const cargar = async () => {
     if (!ventaId) return;
@@ -67,8 +70,6 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
     }
   };
 
-  const formatearNumero = (serie, numero) => `${serie}-${String(numero).padStart(8, '0')}`;
-
   const iconBtn = 'p-1.5 rounded-lg border border-steel-700/40 bg-steel-900/30 text-steel-300 hover:text-steel-100 hover:bg-steel-800 transition-all duration-200';
 
   return (
@@ -104,7 +105,7 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
                   <p className="text-xs font-semibold text-steel-200">
                     {TIPO_COMPROBANTE_LABEL[comp.tipo_comprobante] || comp.tipo_comprobante}
                   </p>
-                  <p className="text-xs text-steel-400 font-mono tracking-wider">{formatearNumero(comp.serie, comp.numero)}</p>
+                  <p className="text-xs text-steel-400 font-mono tracking-wider">{COMPROBANTE_NUMERO.formatear(comp.serie, comp.numero)}</p>
                 </div>
                 <ComprobantesBadge estado={comp.estado} />
                 <span className="text-xs text-steel-300 font-semibold num-chromium">S/ {parseFloat(comp.total).toFixed(2)}</span>
@@ -113,6 +114,13 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
                 {comp.pdf_url && (
                   <button onClick={() => handleDescargarPdf(comp)} className={iconBtn} title="Descargar PDF">
                     <HiOutlineDocumentDownload className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {!comp.anulado && comp.estado !== ESTADO_COMPROBANTE.ERROR && (
+                  <button onClick={() => setModalWhatsapp(comp)}
+                    className="p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all"
+                    title={WA_COMPROBANTE.btnAccion}>
+                    <IconoWhatsapp className="w-3.5 h-3.5" />
                   </button>
                 )}
                 {comp.proveedor_external_id && !comp.anulado && (
@@ -151,6 +159,14 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
           comprobantesExistentes={comprobantes}
           onClose={() => setModalEmitir(false)}
           onSuccess={() => { setModalEmitir(false); cargar(); }}
+          onEnviarWhatsapp={(comp) => { setModalEmitir(false); cargar(); setModalWhatsapp(comp); }}
+        />
+      )}
+
+      {modalWhatsapp && (
+        <ModalWhatsappComprobante
+          comprobante={modalWhatsapp}
+          cerrar={() => setModalWhatsapp(null)}
         />
       )}
 

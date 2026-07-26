@@ -12,25 +12,14 @@ import {
 import api from '../../api/axios';
 import { buildMediaUrl } from '../../utils/media';
 import { formatearMoneda } from '../../utils/formato';
-import { TIPO_MEDIA, WA_MENSAJES, WHATSAPP_SVG_PATH } from '../../config/constants';
+import { TIPO_MEDIA, WA_MENSAJES } from '../../config/constants';
+import { construirUrlWhatsappEmpresa } from '../../utils/whatsapp';
+import IconoWhatsapp from '../../components/ui/IconoWhatsapp';
 import useCarritoPublico from '../../hooks/useCarritoPublico';
 import ModalDetalleProducto from '../../components/public/ModalDetalleProducto';
 import DrawerCarrito from '../../components/public/DrawerCarrito';
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '';
 const PRODUCTOS_POR_PAGINA = 12;
-
-function buildWhatsAppUrl(mensaje) {
-  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`;
-}
-
-function WhatsAppIcon({ className = 'w-5 h-5' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
-      <path d={WHATSAPP_SVG_PATH} />
-    </svg>
-  );
-}
 
 function ProductImage({ producto, className = '' }) {
   const [imgIndex, setImgIndex] = useState(0);
@@ -281,13 +270,13 @@ export default function CatalogoPublico() {
                       {/* Botones */}
                       <div className="flex gap-1.5 mt-2">
                         <a
-                          href={buildWhatsAppUrl(WA_MENSAJES.PRODUCTO(p.nombre, formatearMoneda(precio)))}
+                          href={construirUrlWhatsappEmpresa(WA_MENSAJES.PRODUCTO(p.nombre, formatearMoneda(precio)))}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={e => e.stopPropagation()}
                           className="flex-1 flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md py-1.5 text-[10px] font-bold shadow-sm transition-all duration-200"
                         >
-                          <WhatsAppIcon className="w-3 h-3" />
+                          <IconoWhatsapp className="w-3 h-3" />
                           WhatsApp
                         </a>
                         <button

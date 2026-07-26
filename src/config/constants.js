@@ -170,6 +170,8 @@ export const CLIENTE_FORM = {
   placeholderCorreo: 'Se genera automáticamente si se deja vacío',
   placeholderContrasena: 'Se genera automáticamente si se deja vacía',
   ayuda: 'Solo nombre y teléfono son obligatorios. El correo y contraseña se generan automáticamente si no se proporcionan.',
+  labelEmailFiscal: 'Email fiscal (envío de CPE)',
+  sufijoOpcional: 'opcional',
   btnCancelar: 'Cancelar',
   btnCrear: 'Crear',
   btnActualizar: 'Actualizar',
@@ -347,6 +349,27 @@ DNI_RUC_INPUT.esValido = (v) => {
   if (d.length === DNI_RUC_INPUT.RUC_LENGTH &&
       DNI_RUC_INPUT.RUC_PREFIJOS.includes(d.slice(0, 2))) return true;
   return false;
+};
+
+// Reglas UI para inputs de email (email fiscal del cliente para envío de CPE).
+// - Campo OPCIONAL y NO bloqueante: vacío es válido y nunca impide guardar.
+// - Si trae contenido, debe cumplir el formato; el error se muestra como toast
+//   de la app (no se usa <input type="email">, cuya validación nativa aborta el
+//   submit sin explicar nada al usuario).
+// Mirror de EMAIL en backend/config/constants.js.
+export const EMAIL_INPUT = {
+  MAX_LENGTH: 150, // Espejo de tbl_clientes.email VARCHAR(150)
+  REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
+  INPUT_MODE: 'email',
+  PLACEHOLDER: 'correo@empresa.com',
+};
+EMAIL_INPUT.MSG_INVALIDO = 'Formato de email inválido. Ejemplo: correo@empresa.com';
+EMAIL_INPUT.normalizar = (v) => (v == null ? '' : String(v)).trim();
+// Vacío se considera válido: el campo es opcional.
+EMAIL_INPUT.esValido = (v) => {
+  const limpio = EMAIL_INPUT.normalizar(v);
+  if (limpio === '') return true;
+  return limpio.length <= EMAIL_INPUT.MAX_LENGTH && EMAIL_INPUT.REGEX.test(limpio);
 };
 
 // Estados de asistencia (valores UI para RRHH)
@@ -596,6 +619,14 @@ export const TIPO_COMPROBANTE_LABEL = {
   [TIPO_COMPROBANTE.NOTA_DEBITO]: 'Nota de Débito',
 };
 
+// Numeración visible del comprobante: "F001-00000123".
+// Mirror de COMPROBANTE_NUMERO en backend/config/constants.js.
+export const COMPROBANTE_NUMERO = {
+  LONGITUD_CORRELATIVO: 8,
+};
+COMPROBANTE_NUMERO.formatear = (serie, numero) =>
+  `${serie}-${String(numero).padStart(COMPROBANTE_NUMERO.LONGITUD_CORRELATIVO, '0')}`;
+
 export const ESTADO_COMPROBANTE_LABEL = {
   [ESTADO_COMPROBANTE.PENDIENTE]: 'Pendiente',
   [ESTADO_COMPROBANTE.EMITIDO]: 'Emitido',
@@ -662,11 +693,46 @@ export const LANDING_NAV_LINKS = [
   { href: '#contacto', label: 'Contacto' },
 ];
 
+// Envío manual por WhatsApp al cliente (comprobantes, cotizaciones).
+// Los teléfonos se guardan sin código de país; wa.me lo exige, por eso se
+// antepone aquí. Configurable vía VITE_WHATSAPP_CODIGO_PAIS.
+export const WHATSAPP = {
+  CODIGO_PAIS: import.meta.env.VITE_WHATSAPP_CODIGO_PAIS || '51',
+  // Número propio de la empresa (landing y catálogo público), en formato internacional.
+  NUMERO_EMPRESA: import.meta.env.VITE_WHATSAPP_NUMBER || '',
+  BASE_URL: 'https://wa.me',
+};
+
+// Textos del estado de éxito tras emitir un comprobante
+export const COMPROBANTE_EMITIDO = {
+  toastExito: 'Comprobante emitido exitosamente',
+  titulo: 'Comprobante emitido',
+  detalle: (numero) => `${numero} se emitió correctamente.`,
+  ayudaEnvio: 'Puede enviarlo al cliente por WhatsApp ahora o hacerlo después desde la lista de comprobantes.',
+  btnCerrar: 'Cerrar',
+};
+
+// Textos del modal de envío de comprobante por WhatsApp
+export const WA_COMPROBANTE = {
+  titulo: 'Enviar comprobante por WhatsApp',
+  labelTelefono: 'Teléfono del cliente',
+  labelMensaje: 'Mensaje',
+  ayudaMensaje: 'Puede editar el mensaje antes de enviarlo.',
+  ayudaSinTelefono: 'El cliente no tiene teléfono registrado. Ingrese uno para continuar.',
+  ayudaPdf: 'Al continuar se abrirá el PDF en otra pestaña para que lo adjunte en el chat.',
+  btnCancelar: 'Cancelar',
+  btnAbrir: 'Abrir WhatsApp',
+  btnAccion: 'Enviar por WhatsApp',
+  errorCargar: 'No se pudo generar el mensaje',
+  errorMensajeVacio: 'El mensaje no puede estar vacío',
+};
+
 // Mensajes predefinidos de WhatsApp
 export const WA_MENSAJES = {
   GENERAL: 'Hola, me interesa información sobre sus productos.',
   PRODUCTO: (nombre, precio) => `Hola, me interesa el producto: ${nombre} (${precio})`,
   RESERVA: 'Hola, me interesa reservar productos del próximo ingreso.',
+  RESERVA_PRODUCTOS: (nombres) => `Hola, me interesa reservar del próximo ingreso: ${nombres}`,
   CONTACTO: 'Hola, necesito información sobre sus productos.',
 };
 

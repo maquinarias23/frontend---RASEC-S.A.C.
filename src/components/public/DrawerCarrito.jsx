@@ -3,8 +3,7 @@ import { HiOutlineX, HiOutlineTrash, HiOutlinePlus, HiOutlineMinus, HiOutlineSho
 import { buildMediaUrl } from '../../utils/media';
 import { formatearMoneda } from '../../utils/formato';
 import { TELEFONO_INPUT } from '../../config/constants';
-
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '';
+import { construirUrlWhatsappEmpresa } from '../../utils/whatsapp';
 
 export default function DrawerCarrito({ visible, onClose, carrito, onAgregarItem, onEliminarItem, onFinalizar }) {
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
@@ -74,8 +73,7 @@ export default function DrawerCarrito({ visible, onClose, carrito, onAgregarItem
         `Cotizacion #${data.cotizacion_id}`,
       ].join('\n');
 
-      const wsUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`;
-      window.open(wsUrl, '_blank', 'noopener,noreferrer');
+      window.open(construirUrlWhatsappEmpresa(mensaje), '_blank', 'noopener,noreferrer');
 
       setNombre('');
       setTelefono('');

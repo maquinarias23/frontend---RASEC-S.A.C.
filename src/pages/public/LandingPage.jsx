@@ -29,8 +29,9 @@ import {
   LANDING_SIDEBAR,
   LANDING_PRODUCTOS,
   WA_MENSAJES,
-  WHATSAPP_SVG_PATH,
 } from '../../config/constants';
+import { construirUrlWhatsappEmpresa } from '../../utils/whatsapp';
+import IconoWhatsapp from '../../components/ui/IconoWhatsapp';
 import useCarritoPublico from '../../hooks/useCarritoPublico';
 import ModalDetalleProducto from '../../components/public/ModalDetalleProducto';
 import ModalProximosIngresos from '../../components/public/ModalProximosIngresos';
@@ -48,8 +49,6 @@ import {
 } from '../../components/public/LandingIcons';
 import { LANDING_ICON_MAP, IconDefault } from '../../components/public/landingIconMap';
 
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '';
-
 // ── Helpers ─────────────────────────────────────────────────────────────
 function scrollToSection(e, href) {
   e.preventDefault();
@@ -61,17 +60,6 @@ function scrollToSection(e, href) {
   window.scrollTo({ top, behavior: 'smooth' });
 }
 
-function buildWhatsAppUrl(mensaje) {
-  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`;
-}
-
-function WhatsAppIcon({ className = 'w-5 h-5' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d={WHATSAPP_SVG_PATH} />
-    </svg>
-  );
-}
 
 function getProductImages(producto) {
   if (!producto.media || producto.media.length === 0) return null;
@@ -367,12 +355,12 @@ function ComboCardHorizontal({ combo }) {
                 {LANDING_COMBOS.ctaComprar}
               </button>
               <a
-                href={buildWhatsAppUrl(WA_MENSAJES.PRODUCTO(combo.nombre, formatearMoneda(totalEstimado)))}
+                href={construirUrlWhatsappEmpresa(WA_MENSAJES.PRODUCTO(combo.nombre, formatearMoneda(totalEstimado)))}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-8 bg-[#25d366] hover:bg-[#1da851] text-white rounded flex items-center justify-center shrink-0 transition-colors"
               >
-                <WhatsAppIcon className="w-4 h-4" />
+                <IconoWhatsapp className="w-4 h-4" />
               </a>
             </div>
           </div>
@@ -599,13 +587,13 @@ function ProductosGrid({ onVerProducto, onAgregarCarrito }) {
                       </button>
                       {!agotado && (
                         <a
-                          href={buildWhatsAppUrl(WA_MENSAJES.PRODUCTO(p.nombre, formatearMoneda(precio)))}
+                          href={construirUrlWhatsappEmpresa(WA_MENSAJES.PRODUCTO(p.nombre, formatearMoneda(precio)))}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={e => e.stopPropagation()}
                           className="w-8 bg-[#25d366] hover:bg-[#1da851] text-white rounded flex items-center justify-center transition-colors"
                         >
-                          <WhatsAppIcon className="w-3.5 h-3.5" />
+                          <IconoWhatsapp className="w-3.5 h-3.5" />
                         </a>
                       )}
                     </div>
@@ -662,12 +650,12 @@ function RightSidebar({ stats }) {
       </Link>
 
       <a
-        href={buildWhatsAppUrl(WA_MENSAJES.GENERAL)}
+        href={construirUrlWhatsappEmpresa(WA_MENSAJES.GENERAL)}
         target="_blank"
         rel="noopener noreferrer"
         className="px-4 py-2.5 bg-gradient-to-b from-[#25d366] to-[#1da851] text-white rounded-full text-center font-bold text-[13px] shadow flex items-center justify-center gap-2 hover:-translate-y-0.5 transition-transform"
       >
-        <WhatsAppIcon className="w-4 h-4" />
+        <IconoWhatsapp className="w-4 h-4" />
         {LANDING_SIDEBAR.ctaWhatsApp}
       </a>
 
@@ -768,12 +756,12 @@ function ProximosCompactos({ onVerTodos }) {
                 {esImportacion ? 'Importación' : 'Compra Local'}
               </div>
               <a
-                href={buildWhatsAppUrl(WA_MENSAJES.RESERVA)}
+                href={construirUrlWhatsappEmpresa(WA_MENSAJES.RESERVA)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-1 inline-flex items-center gap-1 text-[10px] text-[#25d366] hover:text-[#1da851] font-semibold"
               >
-                <WhatsAppIcon className="w-3 h-3" /> Reservar
+                <IconoWhatsapp className="w-3 h-3" /> Reservar
               </a>
             </div>
           );

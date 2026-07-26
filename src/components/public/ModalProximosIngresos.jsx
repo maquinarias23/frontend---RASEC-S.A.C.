@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { HiOutlineX, HiOutlineClock, HiOutlinePhone } from 'react-icons/hi';
 import api from '../../api/axios';
 import { formatearFecha } from '../../utils/formato';
-
-const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || '';
+import { WA_MENSAJES } from '../../config/constants';
+import { construirUrlWhatsappEmpresa } from '../../utils/whatsapp';
 
 export default function ModalProximosIngresos({ visible, onClose }) {
   const [data, setData] = useState({ importaciones: [], compras: [] });
@@ -87,7 +87,7 @@ export default function ModalProximosIngresos({ visible, onClose }) {
                 const productNames = items
                   .map((it) => it.tbl_productos?.nombre || 'Producto')
                   .join(', ');
-                const reservaMsg = `Hola, me interesa reservar del proximo ingreso: ${productNames}`;
+                const reservaMsg = WA_MENSAJES.RESERVA_PRODUCTOS(productNames);
 
                 return (
                   <div
@@ -127,7 +127,7 @@ export default function ModalProximosIngresos({ visible, onClose }) {
                     ))}
 
                     <a
-                      href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(reservaMsg)}`}
+                      href={construirUrlWhatsappEmpresa(reservaMsg)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="mt-3 w-full flex items-center justify-center gap-2 text-accent-600 hover:text-accent-500 text-sm font-medium transition-colors"
