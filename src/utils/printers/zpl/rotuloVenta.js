@@ -6,7 +6,6 @@ import {
 import { sanitizarRotuloVenta } from '../shared/sanitize';
 import { resolverFormatoZPL } from './formatos';
 
-const NOMBRE_EMPRESA = 'RASEC S.A.C.';
 
 /**
  * Escapa caracteres reservados de ZPL en un string a imprimir.
@@ -69,8 +68,16 @@ function generarCompleto(formato, d) {
   b.raw(header(formato));
 
   let y = 10;
-  b.field(m, y, fT, NOMBRE_EMPRESA, { fbWidth: usable, fbLines: 1, fbAlign: 'C' });
-  y += fT + 6;
+  b.field(m, y, fT, d.empresaRazon, { fbWidth: usable, fbLines: 2, fbAlign: 'C' });
+  y += fT * 2 + 6;
+  if (d.empresaRuc) {
+    b.field(m, y, fP, `RUC: ${d.empresaRuc}`, { fbWidth: usable, fbLines: 1, fbAlign: 'C' });
+    y += fP + 2;
+  }
+  if (d.empresaDireccion) {
+    b.field(m, y, fP, d.empresaDireccion, { fbWidth: usable, fbLines: 2, fbAlign: 'C' });
+    y += fP * 2 + 2;
+  }
   b.graphicLine(m, y, usable, 3); y += 12;
 
   b.field(m, y, fP, 'Codigo de Venta'); y += fP + 4;
@@ -87,7 +94,19 @@ function generarCompleto(formato, d) {
   b.field(m, y, fN, 'DESTINATARIO'); y += fN + 4;
   b.field(m, y, fP, `Nombre: ${d.destNombre}`, { fbWidth: usable, fbLines: 2 }); y += fP * 2 + 2;
   b.field(m, y, fP, `DNI: ${d.destDni}`); y += fP + 2;
-  b.field(m, y, fP, `Tel: ${d.destTel}`); y += fP + 6;
+  if (d.destRazon) {
+    b.field(m, y, fP, `Razon: ${d.destRazon}`, { fbWidth: usable, fbLines: 2 });
+    y += fP * 2 + 2;
+  }
+  if (d.destDoc) {
+    b.field(m, y, fP, `Doc: ${d.destDoc}`); y += fP + 2;
+  }
+  b.field(m, y, fP, `Tel: ${d.destTel}`); y += fP + 2;
+  if (d.destObs) {
+    b.field(m, y, fP, `Obs: ${d.destObs}`, { fbWidth: usable, fbLines: 2 });
+    y += fP * 2 + 2;
+  }
+  y += 4;
   b.graphicLine(m, y, usable, 1); y += 8;
 
   b.field(m, y, fN, 'DESTINO'); y += fN + 4;
@@ -128,8 +147,14 @@ function generarReducido(formato, d) {
   b.raw(header(formato));
 
   let y = 4;
-  b.field(m, y, fP, NOMBRE_EMPRESA, { fbWidth: usable, fbLines: 1, fbAlign: 'C' });
-  y += fP + 4;
+  b.field(m, y, fP, d.empresaRazon, { fbWidth: usable, fbLines: 1, fbAlign: 'C' });
+  y += fP + 2;
+  // En etiqueta reducida solo cabe el RUC junto a la razón social.
+  if (d.empresaRuc) {
+    b.field(m, y, fP, `RUC: ${d.empresaRuc}`, { fbWidth: usable, fbLines: 1, fbAlign: 'C' });
+    y += fP + 2;
+  }
+  y += 2;
 
   b.field(m, y, fT, d.codigo, { fbWidth: usable, fbLines: 2 });
   y += fT * 2 + 4;

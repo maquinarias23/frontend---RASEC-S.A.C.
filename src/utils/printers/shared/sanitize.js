@@ -20,16 +20,27 @@ export function sanitizarBarcode(codigo) {
  * PPLB-EZPL) — la salida es estructuralmente idéntica.
  */
 export function sanitizarRotuloVenta(data) {
+  const destDni = data.destinatario_dni || '';
+  const destDoc = data.destinatario_documento || '';
   return {
     codigo: data.codigo || '-',
     codigoBarcode: sanitizarBarcode(data.codigo || ''),
     ventaId: data.ventaId ?? '-',
+    // Datos legales de la empresa: encabezan el rótulo. Solo la razón social
+    // tiene respaldo; RUC y dirección se omiten si no están configurados.
+    empresaRazon: data.empresa?.razon_social || 'MAQUINARIA RASEC S.A.C.',
+    empresaRuc: data.empresa?.ruc || '',
+    empresaDireccion: data.empresa?.direccion || '',
     remNombre: data.remitente_nombre || '-',
     remDni: data.remitente_dni || '-',
     remTel: TELEFONO_INPUT.format(data.remitente_telefono) || '-',
     destNombre: data.destinatario_nombre || '-',
-    destDni: data.destinatario_dni || '-',
+    destDni: destDni || '-',
     destTel: TELEFONO_INPUT.format(data.destinatario_telefono) || '-',
+    destRazon: data.destinatario_razon_social || '',
+    // El documento solo se imprime si aporta algo distinto al DNI ya impreso.
+    destDoc: destDoc && destDoc !== destDni ? destDoc : '',
+    destObs: data.destinatario_observacion || '',
     dirCompleta:
       (data.direccion_manual || data.direccion || '-') +
       (data.distrito ? `, ${data.distrito}` : ''),

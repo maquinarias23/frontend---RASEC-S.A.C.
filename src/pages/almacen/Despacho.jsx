@@ -136,6 +136,17 @@ const calcularQrbox = (viewfinderWidth, viewfinderHeight) => {
 };
 
 // ---------------------------------------------------------------------------
+// El rótulo se imprime escribiendo HTML en una ventana nueva. Los datos que
+// interpola (nombres, razón social, observación del receptor) son texto libre,
+// así que se escapan para que un "<" o un "&" no rompa el marcado del rótulo.
+// ---------------------------------------------------------------------------
+const esc = (valor) => String(valor ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+// ---------------------------------------------------------------------------
 // Componente principal
 // ---------------------------------------------------------------------------
 export default function Despacho() {
@@ -199,6 +210,7 @@ export default function Despacho() {
   // Rótulo imprimible
   const [modalRotulo, setModalRotulo] = useState(false);
   const [rotuloData, setRotuloData] = useState(null);
+  const [cargandoRotulo, setCargandoRotulo] = useState(false);
   const barcodeRef = useRef(null);
 
   // Chofer para rótulo
@@ -704,42 +716,56 @@ export default function Despacho() {
 
   // Construye el objeto rotuloData a partir de una venta (de la bandeja o del
   // payload del backend que usa el shape { venta: {...} }) y un chofer opcional.
-  const construirRotuloData = (venta, chofer, codigoRotulo) => {
-    // Soporta dos shapes: venta de bandeja (con tbl_clientes/tbl_direcciones_cliente)
-    // o venta serializada desde backend (con campos planos cliente_nombre, etc.).
-    const dir = venta?.tbl_direcciones_cliente || null;
+  const construirRotuloData = (venta, chofer, codigoRotulo, empresa) => {
+    // Soporta dos shapes: venta de bandeja (con tbl_clientes) o venta
+    // serializada desde backend (con campos planos cliente_nombre, etc.).
     const cli = venta?.tbl_clientes || null;
-    // El destinatario cae al propio cliente cuando la venta no tiene dirección
-    // guardada (envío por agencia o entrega sin dirección), para que nombre, DNI
-    // y teléfono no queden en blanco en el rótulo.
-    const destinatario_nombre = venta?.destinatario_nombre
-      || dir?.nombre_destinatario
-      || cli?.nombre
-      || venta?.cliente_nombre
-      || '';
-    const destinatario_dni = venta?.destinatario_dni
-      || dir?.dni_destinatario
-      || cli?.dni
-      || venta?.cliente_dni
-      || '';
-    const destinatario_telefono = venta?.destinatario_telefono
-      || dir?.telefono_destinatario
-      || cli?.telefono_principal
-      || venta?.cliente_telefono
-      || '';
+    // Quien recibe puede ser un tercero declarado en la venta; si no se declaró
+    // ninguno recae en el propio cliente, para que nombre, documento y teléfono
+    // no queden en blanco en el rótulo.
+    //
+    // El backend ya resuelve esa caída y marca el resultado con
+    // `destinatario_es_tercero`. Cuando ese campo viene, sus valores se toman
+    // literales: si el receptor es una empresa con RUC y sin DNI, el rótulo debe
+    // dejar el DNI vacío, NO rellenarlo con el del cliente que compró.
+    const resueltoPorBackend = venta?.destinatario_es_tercero !== undefined;
+
+    const destinatario_nombre = resueltoPorBackend
+      ? (venta.destinatario_nombre || '')
+      : (venta?.receptor_nombre || venta?.receptor_razon_social || cli?.nombre || venta?.cliente_nombre || '');
+    const destinatario_dni = resueltoPorBackend
+      ? (venta.destinatario_dni || '')
+      : (venta?.receptor_dni || cli?.dni || venta?.cliente_dni || '');
+    const destinatario_telefono = resueltoPorBackend
+      ? (venta.destinatario_telefono || '')
+      : (venta?.receptor_telefono || cli?.telefono_principal || venta?.cliente_telefono || '');
+    const destinatario_documento = resueltoPorBackend
+      ? (venta.destinatario_documento || '')
+      : (venta?.receptor_documento || cli?.ruc || destinatario_dni || '');
+    const destinatario_razon_social = resueltoPorBackend
+      ? (venta.destinatario_razon_social || '')
+      : (venta?.receptor_razon_social || '');
+    const destinatario_observacion = resueltoPorBackend
+      ? (venta.destinatario_observacion || '')
+      : (venta?.receptor_observacion || '');
     const direccion_manual = venta?.direccion_manual || '';
-    const direccion = venta?.direccion || dir?.direccion || direccion_manual || '';
-    // Ubigeo/agencia: desde la dirección guardada o, en su defecto, desde las
-    // relaciones de la venta (caso envío por agencia).
-    const distrito = venta?.distrito || dir?.distrito || venta?.tbl_distritos?.nombre || '';
-    const departamento = venta?.departamento || dir?.departamento || venta?.tbl_departamentos?.nombre || '';
-    const provincia = venta?.provincia || dir?.provincia_nombre || venta?.tbl_provincias?.nombre || '';
-    const agencia_shalom = venta?.agencia_shalom || dir?.agencia_shalom_destino || venta?.tbl_transportistas?.nombre || '';
-    const referencia = venta?.referencia || dir?.referencia || '';
+    // En retiro en tienda no hay dirección de envío: decirlo explícitamente
+    // evita que el rótulo parezca incompleto por un guion en el destino.
+    const esRetiroEnTienda = (venta?.tipo_entrega || '') === TIPO_ENTREGA.RETIRO_EN_TIENDA;
+    const direccion = venta?.direccion
+      || direccion_manual
+      || (esRetiroEnTienda ? 'Retiro en tienda' : '');
+    // Ubigeo/agencia: desde las relaciones de la venta (caso envío por agencia).
+    const distrito = venta?.distrito || venta?.tbl_distritos?.nombre || '';
+    const departamento = venta?.departamento || venta?.tbl_departamentos?.nombre || '';
+    const provincia = venta?.provincia || venta?.tbl_provincias?.nombre || '';
+    const agencia_shalom = venta?.agencia_shalom || venta?.tbl_transportistas?.nombre || '';
+    const referencia = venta?.referencia || '';
 
     return {
       codigo: codigoRotulo,
       ventaId: venta?.id,
+      empresa: empresa || null,
       es_externo: chofer?.externo || false,
       remitente_nombre: chofer?.nombres || '',
       remitente_dni: chofer?.dni || '',
@@ -747,6 +773,9 @@ export default function Despacho() {
       destinatario_nombre,
       destinatario_dni,
       destinatario_telefono,
+      destinatario_documento,
+      destinatario_razon_social,
+      destinatario_observacion,
       direccion,
       distrito,
       departamento,
@@ -757,44 +786,65 @@ export default function Despacho() {
     };
   };
 
+  // Traduce el payload del rótulo del backend (POST/PUT/GET) al shape del
+  // preview. Es la ÚNICA vía por la que se arma un rótulo ya generado, para que
+  // reimprimir muestre exactamente lo mismo que la impresión original.
+  const rotuloDesdeRespuesta = (data, ventaId) => {
+    const chofer = data.chofer
+      ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono, externo: data.chofer.externo }
+      : null;
+    return {
+      chofer,
+      rotulo: construirRotuloData({ ...data.venta, id: ventaId }, chofer, data.codigo_rotulo, data.empresa),
+    };
+  };
+
   // Abrir modal de rótulo (con selector de chofer antes de generar).
-  // Si ya existe rótulo: precarga preview + conductor y permite editarlo.
-  const abrirGenerarRotulo = (venta) => {
+  // Si ya existe rótulo: lo recarga del backend y permite editar el conductor.
+  const abrirGenerarRotulo = async (venta) => {
     setVentaParaRotulo(venta);
     const rotuloExistente = (venta.rotulos || []).slice().sort((a, b) => b.id - a.id)[0] || null;
 
-    if (rotuloExistente) {
-      const esExterno = !rotuloExistente.chofer_user_id && !!rotuloExistente.chofer_externo_nombre;
-      const choferId = rotuloExistente.chofer_user_id ? String(rotuloExistente.chofer_user_id) : '';
-      setChoferSeleccionado(choferId);
-      setChoferPrevioEdicion(choferId);
-      setConductorExterno(esExterno);
-
-      let chofer;
-      if (esExterno) {
-        const ext = {
-          nombre: rotuloExistente.chofer_externo_nombre || '',
-          dni: rotuloExistente.chofer_externo_dni || '',
-          telefono: rotuloExistente.chofer_externo_telefono || '',
-        };
-        setDatosExterno(ext);
-        chofer = { nombres: ext.nombre, dni: ext.dni, telefono: ext.telefono, externo: true };
-      } else {
-        setDatosExterno({ nombre: '', dni: '', telefono: '' });
-        chofer = resolverChofer(choferes, rotuloExistente.chofer_user_id);
-      }
-      setRotuloData(construirRotuloData(venta, chofer, rotuloExistente.codigo_rotulo));
-      // Si no hay conductor asignado todavía, arranca en modo edición
-      setEditandoConductor(!chofer);
-    } else {
+    if (!rotuloExistente) {
       setChoferSeleccionado('');
       setChoferPrevioEdicion('');
       setConductorExterno(false);
       setDatosExterno({ nombre: '', dni: '', telefono: '' });
       setRotuloData(null);
       setEditandoConductor(false);
+      setModalRotulo(true);
+      return;
     }
+
+    const esExterno = !rotuloExistente.chofer_user_id && !!rotuloExistente.chofer_externo_nombre;
+    const choferId = rotuloExistente.chofer_user_id ? String(rotuloExistente.chofer_user_id) : '';
+    setChoferSeleccionado(choferId);
+    setChoferPrevioEdicion(choferId);
+    setConductorExterno(esExterno);
+    setDatosExterno(esExterno
+      ? {
+        nombre: rotuloExistente.chofer_externo_nombre || '',
+        dni: rotuloExistente.chofer_externo_dni || '',
+        telefono: rotuloExistente.chofer_externo_telefono || '',
+      }
+      : { nombre: '', dni: '', telefono: '' });
+
     setModalRotulo(true);
+    setCargandoRotulo(true);
+    try {
+      // El rótulo se recarga completo del backend en vez de rearmarse desde la
+      // fila de la bandeja: así la reimpresión trae los mismos datos de empresa,
+      // receptor y destino que tuvo la impresión original.
+      const { data } = await api.get(`/almacen/${venta.id}/rotulo`);
+      const { chofer, rotulo } = rotuloDesdeRespuesta(data, venta.id);
+      setRotuloData(rotulo);
+      setEditandoConductor(!chofer);
+    } catch (err) {
+      setRotuloData(null);
+      toast.error(err.response?.data?.error || 'No se pudo cargar el rótulo');
+    } finally {
+      setCargandoRotulo(false);
+    }
   };
 
   const generarRotulo = async () => {
@@ -807,14 +857,7 @@ export default function Despacho() {
         : { chofer_user_id: choferSeleccionado || undefined };
       const { data } = await api.post(`/almacen/${id}/rotulo`, payload);
 
-      // Priorizar chofer del backend; fallback al catálogo local por consistencia
-      const choferBackend = data.chofer
-        ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono, externo: data.chofer.externo }
-        : null;
-      const chofer = choferBackend || resolverChofer(choferes, choferSeleccionado);
-
-      // El backend devuelve { venta: {...} } con shape plano
-      setRotuloData(construirRotuloData({ ...data.venta, id }, chofer, data.codigo_rotulo));
+      setRotuloData(rotuloDesdeRespuesta(data, id).rotulo);
       setChoferPrevioEdicion(choferSeleccionado);
       setEditandoConductor(false);
       toast.success(`Rótulo generado: ${data.codigo_rotulo || 'OK'}`);
@@ -873,11 +916,7 @@ export default function Despacho() {
         ? { chofer_externo: { nombre: datosExterno.nombre.trim(), dni: datosExterno.dni.trim(), telefono: datosExterno.telefono.trim() } }
         : { chofer_user_id: choferSeleccionado };
       const { data } = await api.put(`/almacen/${ventaParaRotulo.id}/rotulo`, payload);
-      const choferBackend = data.chofer
-        ? { id: data.chofer.id, nombres: data.chofer.nombre, dni: data.chofer.dni, telefono: data.chofer.telefono, externo: data.chofer.externo }
-        : null;
-      const chofer = choferBackend || resolverChofer(choferes, choferSeleccionado);
-      setRotuloData(construirRotuloData({ ...data.venta, id: ventaParaRotulo.id }, chofer, data.codigo_rotulo));
+      setRotuloData(rotuloDesdeRespuesta(data, ventaParaRotulo.id).rotulo);
       setChoferPrevioEdicion(choferSeleccionado);
       setEditandoConductor(false);
       toast.success('Conductor actualizado');
@@ -1652,12 +1691,20 @@ export default function Despacho() {
           {rotuloData && (
             <>
             <div id="rotulo-print" className="bg-white rounded-xl overflow-hidden border-2 border-steel-600">
-              {/* Header con logo y marca */}
+              {/* Header con logo y datos legales de la empresa */}
               <div className="flex items-center gap-3 px-4 py-3" style={{ background: '#DC2626' }}>
-                <img src="/logo-rasec.png" alt="Logo" className="w-12 h-12 rounded-md bg-white p-0.5 object-contain" />
-                <div>
+                <img src="/logo-rasec.png" alt="Logo" className="w-12 h-12 rounded-md bg-white p-0.5 object-contain shrink-0" />
+                <div className="min-w-0">
                   <p className="text-white font-display text-xl tracking-wider leading-none">RASEC</p>
-                  <p className="text-white/80 text-[10px] tracking-[0.15em] font-medium">RASEC S.A.C.</p>
+                  <p className="text-white/90 text-[10px] tracking-[0.08em] font-semibold leading-tight mt-0.5">
+                    {rotuloData.empresa?.razon_social || 'MAQUINARIA RASEC S.A.C.'}
+                  </p>
+                  {rotuloData.empresa?.ruc && (
+                    <p className="text-white/80 text-[10px] font-medium leading-tight">RUC: {rotuloData.empresa.ruc}</p>
+                  )}
+                  {rotuloData.empresa?.direccion && (
+                    <p className="text-white/75 text-[9px] leading-tight">{rotuloData.empresa.direccion}</p>
+                  )}
                 </div>
               </div>
 
@@ -1683,7 +1730,16 @@ export default function Despacho() {
                 <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
                   <div><span className="text-gray-400">Nombre: </span><span className="font-bold text-gray-900">{rotuloData.destinatario_nombre || '-'}</span></div>
                   <div><span className="text-gray-400">DNI: </span><span className="font-bold text-gray-900">{rotuloData.destinatario_dni || '-'}</span></div>
+                  {rotuloData.destinatario_razon_social && (
+                    <div className="col-span-2"><span className="text-gray-400">Razón social: </span><span className="font-bold text-gray-900">{rotuloData.destinatario_razon_social}</span></div>
+                  )}
+                  {rotuloData.destinatario_documento && rotuloData.destinatario_documento !== rotuloData.destinatario_dni && (
+                    <div className="col-span-2"><span className="text-gray-400">RUC / DNI: </span><span className="font-bold text-gray-900">{rotuloData.destinatario_documento}</span></div>
+                  )}
                   <div className="col-span-2"><span className="text-gray-400">Teléfono: </span><span className="font-bold text-gray-900">{TELEFONO_INPUT.format(rotuloData.destinatario_telefono) || '-'}</span></div>
+                  {rotuloData.destinatario_observacion && (
+                    <div className="col-span-2"><span className="text-gray-400">Observación: </span><span className="font-bold text-gray-900">{rotuloData.destinatario_observacion}</span></div>
+                  )}
                 </div>
               </div>
 
@@ -1732,14 +1788,23 @@ export default function Despacho() {
               onClick={() => {
                 const d = rotuloData;
                 const logoUrl = window.location.origin + '/logo-rasec.png';
-                const remNombre = d.remitente_nombre || '-';
-                const remDni = d.remitente_dni || '-';
-                const remTel = TELEFONO_INPUT.format(d.remitente_telefono) || '-';
-                const destNombre = d.destinatario_nombre || '-';
-                const destDni = d.destinatario_dni || '-';
-                const destTel = TELEFONO_INPUT.format(d.destinatario_telefono) || '-';
-                const dirCompleta = (d.direccion_manual || d.direccion || '-') + (d.distrito ? `, ${d.distrito}` : '');
-                const depto = (d.departamento || '') + (d.provincia ? ` - ${d.provincia}` : '');
+                const remNombre = esc(d.remitente_nombre) || '-';
+                const remDni = esc(d.remitente_dni) || '-';
+                const remTel = esc(TELEFONO_INPUT.format(d.remitente_telefono)) || '-';
+                const destNombre = esc(d.destinatario_nombre) || '-';
+                const destDni = esc(d.destinatario_dni) || '-';
+                const destTel = esc(TELEFONO_INPUT.format(d.destinatario_telefono)) || '-';
+                const destRazon = esc(d.destinatario_razon_social);
+                // El documento solo se repite si aporta algo distinto al DNI ya impreso.
+                const destDoc = d.destinatario_documento && d.destinatario_documento !== d.destinatario_dni
+                  ? esc(d.destinatario_documento)
+                  : '';
+                const destObs = esc(d.destinatario_observacion);
+                const empRazon = esc(d.empresa?.razon_social) || 'MAQUINARIA RASEC S.A.C.';
+                const empRuc = esc(d.empresa?.ruc);
+                const empDir = esc(d.empresa?.direccion);
+                const dirCompleta = esc((d.direccion_manual || d.direccion || '-') + (d.distrito ? `, ${d.distrito}` : ''));
+                const depto = esc((d.departamento || '') + (d.provincia ? ` - ${d.provincia}` : ''));
                 const ventana = window.open('', '_blank');
                 ventana.document.write(`<!DOCTYPE html><html><head><title>Rotulo Venta #${d.ventaId}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1752,7 +1817,9 @@ body{font-family:'Barlow',Arial,sans-serif;margin:0 auto;color:#1a1a1a;-webkit-p
 .hdr{background:#DC2626;padding:clamp(8px,2vw,14px) clamp(10px,3vw,18px);display:flex;align-items:center;gap:clamp(8px,2vw,14px)}
 .hdr img{width:clamp(36px,8vw,52px);height:clamp(36px,8vw,52px);border-radius:6px;background:#fff;padding:3px;object-fit:contain}
 .brand{font-family:'Bebas Neue',Impact,sans-serif;font-size:clamp(16px,4vw,24px);color:#fff;letter-spacing:3px;line-height:1.05}
-.brand-sub{font-size:clamp(8px,1.5vw,11px);color:rgba(255,255,255,.85);letter-spacing:2px;font-weight:500}
+.brand-sub{font-size:clamp(8px,1.5vw,11px);color:rgba(255,255,255,.95);letter-spacing:.5px;font-weight:600;line-height:1.25;margin-top:2px}
+.brand-doc{font-size:clamp(7px,1.3vw,10px);color:rgba(255,255,255,.9);font-weight:500;line-height:1.25}
+.brand-dir{font-size:clamp(7px,1.2vw,9px);color:rgba(255,255,255,.8);line-height:1.25}
 .code-box{text-align:center;padding:clamp(6px,1.5vw,10px) clamp(10px,3vw,18px) clamp(8px,2vw,12px);background:#f8f8f8;border-bottom:2.5px solid #1a1a1a}
 .code-lbl{font-size:clamp(7px,1.2vw,9px);text-transform:uppercase;letter-spacing:2.5px;color:#999;font-weight:600}
 .code-val{font-family:'Bebas Neue',monospace;font-size:clamp(22px,5vw,34px);letter-spacing:clamp(2px,0.8vw,5px);color:#DC2626;margin-top:2px}
@@ -1771,8 +1838,8 @@ body{font-family:'Barlow',Arial,sans-serif;margin:0 auto;color:#1a1a1a;-webkit-p
 @media print{body{padding:0;margin:0 auto;width:100%}@page{margin:5mm}.label{border-width:1.5px}}
 </style></head><body>
 <div class="label">
-<div class="hdr"><img src="${logoUrl}" alt="Logo"><div><div class="brand">RASEC</div><div class="brand-sub">RASEC S.A.C.</div></div></div>
-<div class="code-box"><div class="code-lbl">Código de Venta</div><div class="code-val">${d.codigo}</div></div>
+<div class="hdr"><img src="${logoUrl}" alt="Logo"><div><div class="brand">RASEC</div><div class="brand-sub">${empRazon}</div>${empRuc ? `<div class="brand-doc">RUC: ${empRuc}</div>` : ''}${empDir ? `<div class="brand-dir">${empDir}</div>` : ''}</div></div>
+<div class="code-box"><div class="code-lbl">Código de Venta</div><div class="code-val">${esc(d.codigo)}</div></div>
 <div class="sec"><div class="sec-t">Remitente (quien envía)</div>
 <div class="row"><span class="lbl">Nombre:</span><span class="val">${remNombre}</span></div>
 <div class="row"><span class="lbl">DNI:</span><span class="val">${remDni}</span></div>
@@ -1780,7 +1847,10 @@ body{font-family:'Barlow',Arial,sans-serif;margin:0 auto;color:#1a1a1a;-webkit-p
 <div class="sec"><div class="sec-t">Destinatario (quien recibe)</div>
 <div class="row"><span class="lbl">Nombre:</span><span class="val">${destNombre}</span></div>
 <div class="row"><span class="lbl">DNI:</span><span class="val">${destDni}</span></div>
-<div class="row"><span class="lbl">Teléfono:</span><span class="val">${destTel}</span></div></div>
+${destRazon ? `<div class="row"><span class="lbl">Razón social:</span><span class="val">${destRazon}</span></div>` : ''}
+${destDoc ? `<div class="row"><span class="lbl">RUC / DNI:</span><span class="val">${destDoc}</span></div>` : ''}
+<div class="row"><span class="lbl">Teléfono:</span><span class="val">${destTel}</span></div>
+${destObs ? `<div class="row"><span class="lbl">Observación:</span><span class="val">${destObs}</span></div>` : ''}</div>
 <div class="sec last"><div class="sec-t">Destino</div>
 <div class="row"><span class="lbl">Dirección:</span><span class="val">${dirCompleta}</span></div>
 ${depto ? `<div class="row"><span class="lbl">Depto:</span><span class="val">${depto}</span></div>` : ''}

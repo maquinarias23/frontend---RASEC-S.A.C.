@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import {
@@ -85,7 +86,13 @@ const ATAJOS_FECHA = [
 const POR_PAGINA = 15;
 
 export default function AnalisisMarketing() {
-  const [tab, setTab] = useState('dashboard');
+  // El tab inicial admite deep-link (?tab=campanas) desde el dashboard de Marketing.
+  const [searchParams] = useSearchParams();
+  const tabInicial = TABS.some(t => t.key === searchParams.get('tab'))
+    ? searchParams.get('tab')
+    : 'dashboard';
+  const [tab, setTab] = useState(tabInicial);
+  useEffect(() => { setTab(tabInicial); }, [tabInicial]);
 
   // ── Estado compartido ──
   const [campanas, setCampanas] = useState([]);

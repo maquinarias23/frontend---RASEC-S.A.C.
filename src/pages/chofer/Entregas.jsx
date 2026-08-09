@@ -61,6 +61,18 @@ const columnas = [
       </div>
     );
   }},
+  { key: 'conductor', label: 'Conductor', render: (f) => {
+    const rotulo = (f.rotulos || []).slice().sort((a, b) => b.id - a.id)[0];
+    if (!rotulo) return <span className="text-xs text-steel-500">-</span>;
+    if (rotulo.chofer_externo_nombre) return (
+      <div>
+        <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">Externo</span>
+        <span className="block text-xs text-steel-400 mt-0.5">{rotulo.chofer_externo_nombre}</span>
+      </div>
+    );
+    if (rotulo.chofer_user_id) return <span className="text-xs text-steel-400">Chofer interno</span>;
+    return <span className="text-xs text-steel-500">-</span>;
+  }},
   { key: 'estado_tracking', label: 'Tracking', render: (f) => <EstadoBadge estado={f.estado_tracking} /> },
   { key: 'fecha', label: 'Fecha', render: (f) => formatearFechaHora(f.fecha_hora_registro) },
 ];
@@ -68,6 +80,7 @@ const columnas = [
 export default function Entregas() {
   const { usuario } = useAuthStore();
   const esChofer = usuario?.rol === ROLES.CHOFER;
+  const esAlmacen = usuario?.rol === ROLES.ALMACEN;
   const { datos, cargando, listar } = useCrud('/almacen/envios-chofer');
   const pendientes = datos;
   const { datosPaginados, paginaActual, totalPaginas, irAPagina } = usePaginacion(pendientes);
@@ -282,7 +295,7 @@ export default function Entregas() {
               <button onClick={() => abrirDetalle(fila)} className="text-xs bg-steel-800 text-steel-300 px-2 py-1 rounded hover:bg-steel-700 flex items-center gap-1" title="Ver items">
                 <HiOutlineOfficeBuilding className="w-3.5 h-3.5" /> Items
               </button>
-              {!esChofer && (
+              {!esChofer && !esAlmacen && (
                 <button
                   disabled={operacionEnCurso || incompleta}
                   onClick={incompleta ? onEntregaIncompleta : () => setConfirmEntrega(fila.id)}

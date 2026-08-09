@@ -769,7 +769,6 @@ export default function Prospectos() {
     try {
       const { data } = await api.get(`/clientes/${cliente.id}`);
       setClientePuntos(data.saldo_puntos || 0);
-      setClienteSeleccionado({ ...cliente, direcciones: data.direcciones || [] });
     } catch {
       setClientePuntos(0);
     }

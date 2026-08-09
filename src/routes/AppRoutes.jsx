@@ -74,6 +74,9 @@ import RecepcionCompras from '../pages/almacen/RecepcionCompras';
 import RecepcionImportaciones from '../pages/almacen/RecepcionImportaciones';
 import EscanerSalida from '../pages/almacen/EscanerSalida';
 
+// Marketing e Innovación
+import DashboardMarketing from '../pages/marketing/Dashboard';
+
 // Control de Asistencia
 import DashboardControlAsistencia from '../pages/control-asistencia/Dashboard';
 import EscanerQr from '../pages/control-asistencia/EscanerQr';
@@ -134,7 +137,6 @@ export default function AppRoutes() {
           <Route path="/administrador/puntos" element={<PuntosAdmin />} />
           <Route path="/administrador/rrhh" element={<RRHHAdmin />} />
           <Route path="/administrador/reportes" element={<ReportesAdmin />} />
-          <Route path="/administrador/analisis-marketing" element={<AnalisisMarketing />} />
           <Route path="/administrador/almacenes" element={<AlmacenesAdmin />} />
           <Route path="/administrador/config-facturacion" element={<ConfigFacturacion />} />
         </Route>
@@ -183,6 +185,7 @@ export default function AppRoutes() {
         <Route element={<AppLayout />}>
           <Route path="/almacen/dashboard" element={<DashboardAlmacen />} />
           <Route path="/almacen/despacho" element={<Despacho />} />
+          <Route path="/almacen/entregas" element={<Entregas />} />
           <Route path="/almacen/escaner-salida" element={<EscanerSalida />} />
           <Route path="/almacen/recepcion" element={<RecepcionCompras />} />
           <Route path="/almacen/recepcion-importaciones" element={<RecepcionImportaciones />} />
@@ -191,12 +194,20 @@ export default function AppRoutes() {
         </Route>
       </Route>
 
-      {/* Control de Asistencia */}
-      <Route element={<RutaProtegida rolesPermitidos={[ROLES.SUPER_ADMINISTRADOR, ROLES.ADMINISTRADOR, ROLES.CONTROL_ASISTENCIA]} />}>
+      {/* Control de Asistencia (solo admins) */}
+      <Route element={<RutaProtegida rolesPermitidos={[ROLES.SUPER_ADMINISTRADOR, ROLES.ADMINISTRADOR]} />}>
         <Route element={<AppLayout />}>
           <Route path="/control-asistencia/dashboard" element={<DashboardControlAsistencia />} />
           <Route path="/control-asistencia/escaner" element={<EscanerQr />} />
           <Route path="/control-asistencia/historial" element={<HistorialMarcaciones />} />
+        </Route>
+      </Route>
+
+      {/* Marketing e Innovación (dashboard + módulo Análisis Mkt) */}
+      <Route element={<RutaProtegida rolesPermitidos={[ROLES.SUPER_ADMINISTRADOR, ROLES.ADMINISTRADOR, ROLES.MARKETING_INOVACION]} />}>
+        <Route element={<AppLayout />}>
+          <Route path="/marketing/dashboard" element={<DashboardMarketing />} />
+          <Route path="/administrador/analisis-marketing" element={<AnalisisMarketing />} />
         </Route>
       </Route>
 

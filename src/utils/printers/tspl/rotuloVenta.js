@@ -28,9 +28,12 @@ function dibujarLayoutCompleto(ctx, d, widthDots, margenX) {
   };
 
   ctx.font = 'bold 30px sans-serif';
-  const tituloW = ctx.measureText('RASEC S.A.C.').width;
-  ctx.fillText('RASEC S.A.C.', (widthDots - tituloW) / 2, y);
+  const tituloW = ctx.measureText(d.empresaRazon).width;
+  ctx.fillText(d.empresaRazon, (widthDots - tituloW) / 2, y);
   y += 36;
+  ctx.font = '16px sans-serif';
+  if (d.empresaRuc) escribir(`RUC: ${d.empresaRuc}`, 20);
+  if (d.empresaDireccion) escribir(d.empresaDireccion, 20);
   linea(2);
 
   ctx.font = '18px sans-serif';
@@ -50,7 +53,10 @@ function dibujarLayoutCompleto(ctx, d, widthDots, margenX) {
   ctx.font = '18px sans-serif';
   escribir(`Nombre: ${d.destNombre}`, 22);
   escribir(`DNI:    ${d.destDni}`, 22);
+  if (d.destRazon) escribir(`Razon:  ${d.destRazon}`, 22);
+  if (d.destDoc) escribir(`Doc:    ${d.destDoc}`, 22);
   escribir(`Tel:    ${d.destTel}`, 22);
+  if (d.destObs) escribir(`Obs:    ${d.destObs}`, 22);
   linea(1);
 
   ctx.font = 'bold 20px sans-serif'; escribir('DESTINO', 24);
@@ -86,9 +92,16 @@ function dibujarLayoutReducido(ctx, d, widthDots, margenX) {
   };
 
   ctx.font = 'bold 18px sans-serif';
-  const tw = ctx.measureText('RASEC S.A.C.').width;
-  ctx.fillText('RASEC S.A.C.', (widthDots - tw) / 2, y);
+  const tw = ctx.measureText(d.empresaRazon).width;
+  ctx.fillText(d.empresaRazon, (widthDots - tw) / 2, y);
   y += 22;
+  // En etiqueta reducida solo cabe el RUC junto a la razón social.
+  if (d.empresaRuc) {
+    ctx.font = '14px sans-serif';
+    const rucW = ctx.measureText(`RUC: ${d.empresaRuc}`).width;
+    ctx.fillText(`RUC: ${d.empresaRuc}`, (widthDots - rucW) / 2, y);
+    y += 18;
+  }
 
   ctx.font = 'bold 22px sans-serif';
   escribir(d.codigo, 26);

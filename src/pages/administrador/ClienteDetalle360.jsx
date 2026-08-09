@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { HiOutlineArrowLeft, HiOutlineShoppingCart, HiOutlineStar, HiOutlineCurrencyDollar, HiOutlinePhone, HiOutlineMail, HiOutlineIdentification, HiOutlineCalendar, HiOutlineLocationMarker, HiOutlinePencil, HiOutlineClock } from 'react-icons/hi';
+import { HiOutlineArrowLeft, HiOutlineShoppingCart, HiOutlineStar, HiOutlineCurrencyDollar, HiOutlinePhone, HiOutlineMail, HiOutlineIdentification, HiOutlineCalendar, HiOutlinePencil, HiOutlineClock } from 'react-icons/hi';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import ModalEditarCliente from '../../components/shared/ModalEditarCliente';
 import { formatearFechaHora, formatearFecha, formatearMoneda } from '../../utils/formato';
-import { ESTADO_ACCESO, TIPO_DESTINO, TELEFONO_INPUT, CLIENTE_FORM } from '../../config/constants';
+import { ESTADO_ACCESO, TELEFONO_INPUT, CLIENTE_FORM } from '../../config/constants';
 import useAuthStore from '../../store/authStore';
 import { RUTAS_POR_ROL } from '../../config/roles';
 
@@ -62,7 +62,6 @@ export default function ClienteDetalle360() {
   const tabs = [
     { key: 'resumen', label: 'Resumen' },
     { key: 'compras', label: `Compras (${detalle.total_ventas || 0})` },
-    { key: 'direcciones', label: `Direcciones (${detalle.direcciones?.length || 0})` },
     { key: 'puntos', label: 'Puntos' },
     { key: 'cotizaciones', label: `Cotizaciones (${detalle.cotizaciones_web?.length || 0})` },
   ];
@@ -96,12 +95,6 @@ export default function ClienteDetalle360() {
             </div>
             <div className="flex gap-2 mt-3">
               <EstadoBadge estado={detalle.tbl_usuarios?.estado_acceso || ESTADO_ACCESO.ACTIVO} />
-              {detalle.direcciones?.[0] && (
-                <span className="badge border bg-steel-600/30 text-steel-300 border-steel-500/30">
-                  <HiOutlineLocationMarker className="w-3 h-3 inline mr-1" />
-                  {[detalle.direcciones[0].distrito, detalle.direcciones[0].departamento].filter(Boolean).join(', ')}
-                </span>
-              )}
             </div>
           </div>
         </div>
@@ -262,29 +255,6 @@ export default function ClienteDetalle360() {
                     {!v.pago_completo && <span className="text-red-600">Saldo pendiente: {formatearMoneda(v.saldo_pendiente)}</span>}
                     {v.pago_completo && <span className="text-emerald-600 font-medium">PAGADO COMPLETO</span>}
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* DIRECCIONES */}
-          {tab === 'direcciones' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {detalle.direcciones?.length === 0 && <p className="text-steel-500 text-sm text-center py-12 col-span-2">Sin direcciones registradas.</p>}
-              {detalle.direcciones?.map((dir, i) => (
-                <div key={dir.id || i} className="bg-steel-800/30 border border-steel-700/30 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${dir.tipo_destino === TIPO_DESTINO.LIMA ? 'bg-blue-500/15 text-blue-600' : 'bg-orange-500/15 text-orange-600'}`}>
-                      {dir.tipo_destino === TIPO_DESTINO.LIMA ? 'Lima' : 'Provincia'}
-                    </span>
-                    {dir.nombre_destinatario && <span className="text-xs text-steel-400">Dest: {dir.nombre_destinatario}</span>}
-                  </div>
-                  <p className="text-sm font-medium text-steel-100">{dir.direccion}</p>
-                  <p className="text-sm text-steel-400 mt-1">{[dir.distrito, dir.provincia_nombre, dir.departamento].filter(Boolean).join(', ')}</p>
-                  {dir.agencia_shalom_destino && <p className="text-sm text-steel-400 mt-1">Agencia de envío: {dir.agencia_shalom_destino}</p>}
-                  {dir.referencia && <p className="text-xs text-steel-500 mt-1">Ref: {dir.referencia}</p>}
-                  {dir.telefono_destinatario && <p className="text-sm text-steel-400 mt-1">Tel: {TELEFONO_INPUT.format(dir.telefono_destinatario)}{dir.segundo_numero ? ` / ${TELEFONO_INPUT.format(dir.segundo_numero)}` : ''}</p>}
-                  {dir.dni_destinatario && <p className="text-sm text-steel-400">DNI Dest: {dir.dni_destinatario}</p>}
                 </div>
               ))}
             </div>

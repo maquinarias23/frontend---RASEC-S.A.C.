@@ -122,7 +122,7 @@ export default function Login() {
     { label: 'Vendedor', correo: 'vendedor@raseksaka.com', color: 'from-blue-600 to-blue-800' },
     { label: 'Almacén', correo: 'almacen@raseksaka.com', color: 'from-emerald-600 to-emerald-800' },
     { label: 'Chofer', correo: 'chofer@raseksaka.com', color: 'from-amber-600 to-amber-800' },
-    { label: 'Asistencia', correo: 'asistencia@raseksaka.com', color: 'from-cyan-600 to-cyan-800' },
+    { label: 'Marketing', correo: 'marketing@raseksaka.com', color: 'from-cyan-600 to-cyan-800' },
     { label: 'Cliente', correo: 'cliente@raseksaka.com', color: 'from-teal-600 to-teal-800' },
   ];
 

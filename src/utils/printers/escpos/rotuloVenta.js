@@ -2,8 +2,6 @@ import ESCPOSEncoder from './encoder';
 import { sanitizarRotuloVenta } from '../shared/sanitize';
 import { resolverFormatoESCPOS } from './formatos';
 
-const NOMBRE_EMPRESA = 'RASEC S.A.C.';
-
 /**
  * Wrap manual por longitud de caracteres (ESC/POS no tiene "canvas").
  */
@@ -45,8 +43,12 @@ export function generarRotuloVentaESCPOS(data, opts = {}) {
 
   const enc = new ESCPOSEncoder();
 
-  enc.align('center').size('double').bold(true).text(NOMBRE_EMPRESA);
+  enc.align('center').size('double').bold(true).text(d.empresaRazon);
   enc.size('normal').bold(false);
+  if (d.empresaRuc) enc.text(`RUC: ${d.empresaRuc}`);
+  if (d.empresaDireccion) {
+    for (const ln of wrapTextoChars(d.empresaDireccion, w)) enc.text(ln);
+  }
   enc.line('=', w);
 
   enc.align('center').text('Codigo de Venta');
@@ -65,7 +67,16 @@ export function generarRotuloVentaESCPOS(data, opts = {}) {
   enc.bold(false);
   for (const ln of wrapTextoChars(`Nombre: ${d.destNombre}`, w)) enc.text(ln);
   for (const ln of wrapTextoChars(`DNI:    ${d.destDni}`, w)) enc.text(ln);
+  if (d.destRazon) {
+    for (const ln of wrapTextoChars(`Razon:  ${d.destRazon}`, w)) enc.text(ln);
+  }
+  if (d.destDoc) {
+    for (const ln of wrapTextoChars(`Doc:    ${d.destDoc}`, w)) enc.text(ln);
+  }
   for (const ln of wrapTextoChars(`Tel:    ${d.destTel}`, w)) enc.text(ln);
+  if (d.destObs) {
+    for (const ln of wrapTextoChars(`Obs:    ${d.destObs}`, w)) enc.text(ln);
+  }
   enc.line('-', w);
 
   enc.bold(true).text('DESTINO');

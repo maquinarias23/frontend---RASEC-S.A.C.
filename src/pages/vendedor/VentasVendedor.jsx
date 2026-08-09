@@ -15,6 +15,7 @@ import {
   HiOutlineCollection,
   HiOutlinePencilAlt,
   HiOutlineClock,
+  HiOutlineUser,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -24,6 +25,7 @@ import TablaGenerica from '../../components/ui/TablaGenerica';
 import Modal from '../../components/ui/Modal';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import TotalizadorVenta from '../../components/shared/TotalizadorVenta';
+import ModalEditarCliente from '../../components/shared/ModalEditarCliente';
 import Paginacion from '../../components/ui/Paginacion';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
@@ -45,6 +47,23 @@ import {
 import useAuthStore from '../../store/authStore';
 import { ROLES } from '../../config/roles';
 import { obtenerDepartamentos, obtenerProvincias, obtenerDistritos } from '../../services/ubigeoService';
+
+// ---------------------------------------------------------------------------
+// Persona que RECIBE el envío. Puede no ser el cliente que compra: estos datos
+// van al rótulo y a la guía de remisión, y opcionalmente quedan guardados como
+// contacto del cliente para reutilizarlos en ventas posteriores.
+// ---------------------------------------------------------------------------
+const RECEPTOR_VACIO = {
+  nombre: '',
+  numero_documento: '',
+  razon_social: '',
+  telefono: '',
+  observacion: '',
+};
+
+const receptorTieneDatos = (r) =>
+  !!(r.nombre.trim() || r.numero_documento.trim() || r.razon_social.trim()
+    || r.telefono.trim() || r.observacion.trim());
 
 // ---------------------------------------------------------------------------
 // Componente interno: Buscador con autocomplete personalizado
@@ -242,6 +261,14 @@ export default function VentasVendedor() {
   const [promociones, setPromociones] = useState([]);
   const [creandoVenta, setCreandoVenta] = useState(false);
 
+  // --- Estado: quien recibe el envío (no siempre es el cliente) ---
+  // Estos datos van al rótulo y a la guía de remisión, y opcionalmente quedan
+  // en la agenda de contactos del cliente para reutilizarlos en otras ventas.
+  const [receptor, setReceptor] = useState(RECEPTOR_VACIO);
+  const [guardarReceptor, setGuardarReceptor] = useState(true);
+  const [contactosCliente, setContactosCliente] = useState([]);
+  const [contactoSeleccionado, setContactoSeleccionado] = useState('');
+
   // --- Estado: agregar item temporal ---
   const [productoTemp, setProductoTemp] = useState(null);
   const [stockDisponible, setStockDisponible] = useState(0);
@@ -274,10 +301,8 @@ export default function VentasVendedor() {
   const [confirmCancelar, setConfirmCancelar] = useState(null);
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
 
-  // --- Estado: crear cliente inline ---
+  // --- Estado: crear cliente desde la venta ---
   const [modalCrearCliente, setModalCrearCliente] = useState(false);
-  const [formCliente, setFormCliente] = useState({ nombre: '', dni: '', telefono_principal: '', correo: '' });
-  const [creandoCliente, setCreandoCliente] = useState(false);
   const [tarjetaCredenciales, setTarjetaCredenciales] = useState(null);
 
   // Reenvío de pedido rechazado
@@ -314,36 +339,17 @@ export default function VentasVendedor() {
     );
   }, []);
 
-  const crearClienteInline = async (e) => {
-    e.preventDefault();
-    if (!formCliente.nombre || !formCliente.telefono_principal) {
-      toast.error('Nombre y teléfono son obligatorios');
-      return;
+  // Recibe la respuesta de ModalEditarCliente, que puede venir de dos caminos:
+  // crear ({ cliente, credenciales }) o vincular un cliente ya existente
+  // ({ mensaje, cliente }). En ambos queda seleccionado para la venta.
+  const onClienteCreado = async (data) => {
+    const nuevo = data?.cliente || data;
+    if (nuevo?.id) {
+      await seleccionarCliente(nuevo);
     }
-    const telDigits = TELEFONO_INPUT.toDigits(formCliente.telefono_principal);
-    if (!TELEFONO_INPUT.esValido(telDigits)) {
-      toast.error(TELEFONO_INPUT.MSG_INVALIDO);
-      return;
+    if (data?.credenciales) {
+      setTarjetaCredenciales(data.credenciales);
     }
-    const dniDigits = DNI_RUC_INPUT.toDigits(formCliente.dni);
-    if (dniDigits && !DNI_RUC_INPUT.esValido(dniDigits)) {
-      toast.error(`DNI / RUC: ${DNI_RUC_INPUT.MSG_INVALIDO}`);
-      return;
-    }
-    setCreandoCliente(true);
-    try {
-      const { data } = await api.post('/clientes', { ...formCliente, dni: dniDigits || null, telefono_principal: telDigits });
-      setClienteSeleccionado(data);
-      if (data.credenciales) {
-        setTarjetaCredenciales(data.credenciales);
-      }
-      setModalCrearCliente(false);
-      setFormCliente({ nombre: '', dni: '', telefono_principal: '', correo: '' });
-      toast.success('Cliente creado exitosamente');
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Error al crear cliente');
-    }
-    setCreandoCliente(false);
   };
 
   // =========================================================================
@@ -375,6 +381,10 @@ export default function VentasVendedor() {
     setMontoAdelanto('');
     setMetodoPagoAdelanto(METODOS_PAGO.EFECTIVO);
     setArchivoBoucherAdelanto(null);
+    setReceptor(RECEPTOR_VACIO);
+    setGuardarReceptor(true);
+    setContactosCliente([]);
+    setContactoSeleccionado('');
     try {
       const { data } = await api.get('/promociones/activas');
       setPromociones(Array.isArray(data) ? data : (data.datos || []));
@@ -440,18 +450,51 @@ export default function VentasVendedor() {
   };
 
   // =========================================================================
-  // Seleccionar cliente -> cargar puntos y direcciones
+  // Seleccionar cliente -> cargar puntos y su agenda de contactos
   // =========================================================================
 
   const seleccionarCliente = async (cliente) => {
     setClienteSeleccionado(cliente);
+    // La agenda es por cliente: al cambiar de cliente se descarta el receptor
+    // elegido para no arrastrar a alguien que pertenece a otra cartera.
+    setReceptor(RECEPTOR_VACIO);
+    setContactoSeleccionado('');
     try {
       const { data } = await api.get(`/clientes/${cliente.id}`);
       setClientePuntos(data.saldo_puntos || 0);
-      setClienteSeleccionado({ ...cliente, direcciones: data.direcciones || [] });
     } catch {
       setClientePuntos(0);
     }
+    try {
+      const { data } = await api.get(`/clientes/${cliente.id}/contactos`);
+      setContactosCliente(Array.isArray(data) ? data : []);
+    } catch {
+      setContactosCliente([]);
+    }
+  };
+
+  // Rellena el formulario de "quien recibe" con un contacto ya guardado.
+  const elegirContactoReceptor = (contactoId) => {
+    setContactoSeleccionado(contactoId);
+    if (!contactoId) {
+      setReceptor(RECEPTOR_VACIO);
+      return;
+    }
+    const c = contactosCliente.find((x) => String(x.id) === String(contactoId));
+    if (!c) return;
+    setReceptor({
+      nombre: c.nombre || '',
+      numero_documento: c.numero_documento || '',
+      razon_social: c.razon_social || '',
+      telefono: c.telefono || '',
+      observacion: c.observacion || '',
+    });
+  };
+
+  // Al editar a mano, deja de ser "el contacto guardado tal cual".
+  const cambiarCampoReceptor = (campo, valor) => {
+    setReceptor((prev) => ({ ...prev, [campo]: valor }));
+    setContactoSeleccionado('');
   };
 
   // =========================================================================
@@ -560,7 +603,7 @@ export default function VentasVendedor() {
 
       setItems([...items, ...nuevosItems]);
       toast.success(`Combo "${combo.nombre}" cargado (${combo.items_combo.length} productos)`);
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar el combo');
     } finally {
       setCargandoCombos(false);
@@ -688,6 +731,25 @@ export default function VentasVendedor() {
       if (!departamentoId || !provinciaId || !distritoId) return toast.error('Selecciona departamento, provincia y distrito');
     }
 
+    // Quien recibe es opcional, pero si el vendedor declaró algo debe quedar
+    // identificable: el rótulo y la guía de remisión necesitan un nombre.
+    const hayReceptor = receptorTieneDatos(receptor);
+    if (hayReceptor && !receptor.nombre.trim() && !receptor.razon_social.trim()) {
+      return toast.error('Indica el nombre o la razón social de quien recibe');
+    }
+    if (hayReceptor && receptor.numero_documento.trim()) {
+      const docDigits = DNI_RUC_INPUT.toDigits(receptor.numero_documento);
+      if (!DNI_RUC_INPUT.esValido(docDigits)) {
+        return toast.error(`Documento de quien recibe: ${DNI_RUC_INPUT.MSG_INVALIDO}`);
+      }
+    }
+    if (hayReceptor && receptor.telefono.trim()) {
+      const telDigits = TELEFONO_INPUT.toDigits(receptor.telefono);
+      if (telDigits.length !== TELEFONO_INPUT.MAX_DIGITS) {
+        return toast.error(`Teléfono de quien recibe: ${TELEFONO_INPUT.MSG_INVALIDO}`);
+      }
+    }
+
     const adelanto = conAdelanto ? parseFloat(montoAdelanto) : 0;
     if (conAdelanto) {
       if (!adelanto || adelanto <= 0) return toast.error('El monto del adelanto debe ser mayor a 0');
@@ -718,6 +780,17 @@ export default function VentasVendedor() {
       }))));
       if (promocionId) formData.append('promocion_id', parseInt(promocionId));
       if (descuentoPuntos > 0) formData.append('descuento_puntos', descuentoPuntos);
+
+      if (hayReceptor) {
+        formData.append('receptor', JSON.stringify({
+          nombre: receptor.nombre.trim(),
+          numero_documento: DNI_RUC_INPUT.toDigits(receptor.numero_documento),
+          razon_social: receptor.razon_social.trim(),
+          telefono: TELEFONO_INPUT.toDigits(receptor.telefono),
+          observacion: receptor.observacion.trim(),
+        }));
+        formData.append('guardar_receptor', guardarReceptor ? 'true' : 'false');
+      }
 
       if (conAdelanto && adelanto > 0) {
         formData.append('monto_adelanto', adelanto);
@@ -767,9 +840,25 @@ export default function VentasVendedor() {
     }
   };
 
+  // El saldo_pendiente de la venta solo descuenta pagos APROBADOS; los pagos
+  // en verificación (voucher aún sin aprobar ni rechazar) no se reflejan ahí
+  // pero SÍ cuentan para el backend. El máximo registrable es el saldo
+  // disponible (total − aprobados − en verificación).
+  const montoEnVerificacion = (ventaPago?.pagos || [])
+    .filter((p) => (p.adjuntos || []).some((a) => !a.aprobado && !a.rechazado))
+    .reduce((s, p) => s + parseFloat(p.monto), 0);
+  const saldoDisponiblePago = ventaPago
+    ? parseFloat(ventaPago.saldo_disponible ?? ventaPago.saldo_pendiente ?? 0)
+    : 0;
+
   const registrarPago = async (e) => {
     e.preventDefault();
     if (!ventaPago) return;
+    const montoNum = parseFloat(formPago.monto);
+    if (!montoNum || montoNum <= 0) return toast.error('Ingresa un monto válido');
+    if (montoNum > saldoDisponiblePago + 0.004) {
+      return toast.error(`El monto no puede superar el saldo disponible por registrar (${formatearMoneda(saldoDisponiblePago)})`);
+    }
     if (!formPago.metodo_pago) return toast.error('El método de pago es obligatorio');
     if (!archivoBoucher) return toast.error('El boucher es obligatorio');
 
@@ -1084,6 +1173,119 @@ export default function VentasVendedor() {
               <p className="text-xs text-blue-600 mt-1">No es necesario especificar dirección de envío</p>
             </div>
           )}
+
+          {/* ---- QUIEN RECIBE (opcional, va al rótulo y a la guía de remisión) ---- */}
+          <div className="border-t border-steel-700 pt-4">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-steel-200 flex items-center gap-1">
+                <HiOutlineUser className="w-4 h-4" />
+                Quién recibe
+              </label>
+              <span className="text-xs text-steel-500">Opcional</span>
+            </div>
+            <p className="text-xs text-steel-500 mb-3">
+              Si no lo completas, el rótulo y la guía de remisión salen a nombre del cliente.
+            </p>
+
+            {!clienteSeleccionado ? (
+              <p className="text-xs text-steel-500 italic">Selecciona primero un cliente.</p>
+            ) : (
+              <div className="space-y-3">
+                {contactosCliente.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-medium text-steel-300 mb-1">Contactos guardados de este cliente</label>
+                    <select
+                      className="input-field"
+                      value={contactoSeleccionado}
+                      onChange={(e) => elegirContactoReceptor(e.target.value)}
+                    >
+                      <option value="">Ingresar datos nuevos...</option>
+                      {contactosCliente.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre}{c.numero_documento ? ` — ${c.numero_documento}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-steel-300 mb-1">Nombre de quien recibe</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={receptor.nombre}
+                      onChange={(e) => cambiarCampoReceptor('nombre', e.target.value)}
+                      placeholder="Nombre completo"
+                      maxLength={200}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-steel-300 mb-1">DNI o RUC</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      inputMode={DNI_RUC_INPUT.INPUT_MODE}
+                      pattern={DNI_RUC_INPUT.PATTERN}
+                      maxLength={DNI_RUC_INPUT.MAX_LENGTH}
+                      value={receptor.numero_documento}
+                      onChange={(e) => cambiarCampoReceptor('numero_documento', DNI_RUC_INPUT.toDigits(e.target.value))}
+                      placeholder={DNI_RUC_INPUT.PLACEHOLDER}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-steel-300 mb-1">Razón social</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={receptor.razon_social}
+                      onChange={(e) => cambiarCampoReceptor('razon_social', e.target.value)}
+                      placeholder="Si recibe una empresa"
+                      maxLength={300}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-steel-300 mb-1">Teléfono</label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      inputMode={TELEFONO_INPUT.INPUT_MODE}
+                      pattern={TELEFONO_INPUT.PATTERN}
+                      maxLength={TELEFONO_INPUT.MAX_LENGTH}
+                      value={TELEFONO_INPUT.format(receptor.telefono)}
+                      onChange={(e) => cambiarCampoReceptor('telefono', TELEFONO_INPUT.toDigits(e.target.value))}
+                      placeholder={TELEFONO_INPUT.PLACEHOLDER}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-steel-300 mb-1">Observación</label>
+                  <textarea
+                    className="input-field"
+                    rows={2}
+                    value={receptor.observacion}
+                    onChange={(e) => cambiarCampoReceptor('observacion', e.target.value)}
+                    placeholder="Indicaciones para la entrega"
+                    maxLength={500}
+                  />
+                </div>
+
+                {receptorTieneDatos(receptor) && (
+                  <label className="flex items-center gap-2 text-xs text-steel-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={guardarReceptor}
+                      onChange={(e) => setGuardarReceptor(e.target.checked)}
+                      className="rounded border-steel-600"
+                    />
+                    Guardar en los contactos del cliente para próximas ventas
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* ---- CARGAR COMBO ---- */}
           {combosDisponibles.length > 0 && (
@@ -1576,6 +1778,26 @@ export default function VentasVendedor() {
                 <span>Saldo pendiente:</span>
                 <span>{formatearMoneda(ventaPago.saldo_pendiente)}</span>
               </div>
+              {montoEnVerificacion > 0 && (
+                <>
+                  <div className="flex justify-between text-amber-500">
+                    <span>Pagos en verificación:</span>
+                    <span>{formatearMoneda(montoEnVerificacion)}</span>
+                  </div>
+                  <div className="flex justify-between text-emerald-600 font-semibold">
+                    <span>Disponible por registrar:</span>
+                    <span>{formatearMoneda(saldoDisponiblePago)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {montoEnVerificacion > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-600">
+              Esta venta tiene {formatearMoneda(montoEnVerificacion)} en pagos con voucher pendiente de aprobación.
+              Ese monto ya está contado: solo puedes registrar hasta {formatearMoneda(Math.max(saldoDisponiblePago, 0))}.
+              {saldoDisponiblePago <= 0 && ' Los pagos registrados ya cubren el total; espera la aprobación o el rechazo del voucher.'}
             </div>
           )}
 
@@ -1602,7 +1824,7 @@ export default function VentasVendedor() {
               type="number"
               step="0.01"
               min="0.01"
-              max={ventaPago ? parseFloat(ventaPago.saldo_pendiente) : undefined}
+              max={ventaPago ? Math.max(saldoDisponiblePago, 0) : undefined}
               className="input-field"
               value={formPago.monto}
               onChange={(e) => setFormPago({ ...formPago, monto: e.target.value })}
@@ -1653,8 +1875,14 @@ export default function VentasVendedor() {
             <button
               type="submit"
               className="btn-primary flex items-center gap-2"
-              disabled={registrandoPago || !!ventaPago?.pago_cliente_pendiente}
-              title={ventaPago?.pago_cliente_pendiente ? MSG_PAGO_BLOQUEADO_CLIENTE.TOOLTIP_BOTON : undefined}
+              disabled={registrandoPago || !!ventaPago?.pago_cliente_pendiente || saldoDisponiblePago <= 0}
+              title={
+                ventaPago?.pago_cliente_pendiente
+                  ? MSG_PAGO_BLOQUEADO_CLIENTE.TOOLTIP_BOTON
+                  : saldoDisponiblePago <= 0
+                    ? 'Los pagos registrados (aprobados + en verificación) ya cubren el total de la venta'
+                    : undefined
+              }
             >
               {registrandoPago ? (
                 <>
@@ -1732,14 +1960,6 @@ export default function VentasVendedor() {
                 <span className="text-blue-600 font-medium text-xs block mb-1">Destino de envío</span>
                 <p className="text-blue-600">
                   {ventaDetalle.tbl_departamentos.nombre} / {ventaDetalle.tbl_provincias?.nombre} / {ventaDetalle.tbl_distritos?.nombre}
-                </p>
-              </div>
-            ) : ventaDetalle.tbl_direcciones_cliente ? (
-              <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                <span className="text-blue-600 font-medium text-xs block mb-1">Dirección de envío (guardada)</span>
-                <p className="text-blue-600">
-                  {ventaDetalle.tbl_direcciones_cliente.direccion} - {ventaDetalle.tbl_direcciones_cliente.distrito}
-                  {ventaDetalle.tbl_direcciones_cliente.departamento && `, ${ventaDetalle.tbl_direcciones_cliente.departamento}`}
                 </p>
               </div>
             ) : ventaDetalle.direccion_manual ? (
@@ -2201,53 +2421,14 @@ export default function VentasVendedor() {
       </Modal>
 
       {/* ================================================================= */}
-      {/* MODAL: CREAR CLIENTE INLINE                                       */}
+      {/* MODAL: CREAR CLIENTE (formulario compartido con Clientes)         */}
       {/* ================================================================= */}
-      <Modal abierto={modalCrearCliente} cerrar={() => setModalCrearCliente(false)} titulo="Nuevo Cliente">
-        <form onSubmit={crearClienteInline} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">Nombre completo *</label>
-            <input type="text" className="input-field" value={formCliente.nombre} onChange={e => setFormCliente({...formCliente, nombre: e.target.value})} required />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">DNI / RUC</label>
-            <input
-              type="text"
-              className="input-field"
-              inputMode={DNI_RUC_INPUT.INPUT_MODE}
-              pattern={DNI_RUC_INPUT.PATTERN}
-              maxLength={DNI_RUC_INPUT.MAX_LENGTH}
-              placeholder={DNI_RUC_INPUT.PLACEHOLDER}
-              value={formCliente.dni}
-              onChange={e => setFormCliente({...formCliente, dni: DNI_RUC_INPUT.toDigits(e.target.value)})}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">Teléfono *</label>
-            <input
-              type="tel"
-              className="input-field"
-              inputMode={TELEFONO_INPUT.INPUT_MODE}
-              pattern={TELEFONO_INPUT.PATTERN}
-              maxLength={TELEFONO_INPUT.MAX_LENGTH}
-              placeholder={TELEFONO_INPUT.PLACEHOLDER}
-              value={formCliente.telefono_principal}
-              onChange={e => setFormCliente({...formCliente, telefono_principal: TELEFONO_INPUT.format(e.target.value)})}
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">Correo</label>
-            <input type="email" className="input-field" value={formCliente.correo} onChange={e => setFormCliente({...formCliente, correo: e.target.value})} />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setModalCrearCliente(false)} className="btn-secondary">Cancelar</button>
-            <button type="submit" className="btn-primary" disabled={creandoCliente}>
-              {creandoCliente ? 'Creando...' : 'Crear Cliente'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+      <ModalEditarCliente
+        abierto={modalCrearCliente}
+        cerrar={() => setModalCrearCliente(false)}
+        cliente={null}
+        onGuardado={onClienteCreado}
+      />
 
       {/* ================================================================= */}
       {/* MODAL: TARJETA CREDENCIALES                                       */}

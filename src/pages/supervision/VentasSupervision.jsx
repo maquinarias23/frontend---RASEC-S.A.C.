@@ -67,11 +67,6 @@ export default function VentasSupervision() {
                     {detalle.tbl_departamentos.nombre} / {detalle.tbl_provincias?.nombre} / {detalle.tbl_distritos?.nombre}
                   </p>
                 </div>
-              ) : detalle.tbl_direcciones ? (
-                <div className="bg-steel-800/30 rounded-lg p-3 text-sm">
-                  <span className="text-steel-400 font-medium text-xs block mb-1">Dirección de envío</span>
-                  <p className="text-steel-200">{detalle.tbl_direcciones.direccion_completa || detalle.tbl_direcciones.direccion}</p>
-                </div>
               ) : detalle.direccion_manual ? (
                 <div className="bg-blue-50 rounded-lg p-3 text-sm">
                   <span className="text-blue-600 font-medium text-xs block mb-1">Dirección de envío (manual)</span>

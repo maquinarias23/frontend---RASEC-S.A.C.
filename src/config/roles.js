@@ -6,7 +6,7 @@ export const ROLES = {
   VENDEDOR: 'VENDEDOR',
   ALMACEN: 'ALMACEN',
   CHOFER: 'CHOFER',
-  CONTROL_ASISTENCIA: 'CONTROL_ASISTENCIA',
+  MARKETING_INOVACION: 'MARKETING_INOVACION',
   CLIENTE: 'CLIENTE',
 };
 
@@ -18,7 +18,7 @@ export const RUTAS_POR_ROL = {
   VENDEDOR: '/vendedor/dashboard',
   ALMACEN: '/almacen/dashboard',
   CHOFER: '/chofer/dashboard',
-  CONTROL_ASISTENCIA: '/control-asistencia/dashboard',
+  MARKETING_INOVACION: '/marketing/dashboard',
   CLIENTE: '/cliente/dashboard',
 };
 

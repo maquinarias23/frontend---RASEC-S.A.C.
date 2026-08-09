@@ -25,6 +25,10 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
   // Cliente existente detectado por DNI/RUC duplicado, pendiente de confirmar
   // la vinculación a la cartera del vendedor actual.
   const [confirmVinc, setConfirmVinc] = useState(null);
+  // Resultado de la verificación del documento mientras se escribe:
+  // null | { estado: 'verificando' } | { estado: 'existe', cliente, yaVinculado }
+  const [dniCheck, setDniCheck] = useState(null);
+  const [vinculando, setVinculando] = useState(false);
 
   // Estado del selector cascada de ubigeo
   const [departamentos, setDepartamentos] = useState([]);
@@ -95,7 +99,42 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
       setDistritos([]);
     }
     setVerPass(false);
+    setDniCheck(null);
+    setConfirmVinc(null);
   }, [abierto, cliente]);
+
+  // Verifica el documento contra TODOS los clientes (no solo la cartera propia).
+  // Sin esto un vendedor no ve a un cliente que existe pero no es suyo y acaba
+  // creando un duplicado. El `verificando` lo enciende el onChange del input:
+  // aquí solo se publica el resultado, ya dentro de una callback asíncrona.
+  useEffect(() => {
+    if (!abierto) return;
+    const digits = DNI_RUC_INPUT.toDigits(form.dni);
+    if (!DNI_RUC_INPUT.esValido(digits)) return;
+
+    let vigente = true;
+    const temporizador = setTimeout(async () => {
+      try {
+        const { data } = await api.get('/clientes/verificar-dni', {
+          params: { dni: digits, ...(cliente?.id ? { excluir_id: cliente.id } : {}) },
+        });
+        if (!vigente) return;
+        setDniCheck(data?.existe
+          ? { estado: 'existe', cliente: data.cliente, yaVinculado: !!data.yaVinculado }
+          : null);
+      } catch {
+        if (vigente) setDniCheck(null);
+      }
+    }, 400);
+
+    return () => { vigente = false; clearTimeout(temporizador); };
+  }, [abierto, form.dni, cliente?.id]);
+
+  const cambiarDni = (valor) => {
+    const digits = DNI_RUC_INPUT.toDigits(valor);
+    setForm((prev) => ({ ...prev, dni: digits }));
+    setDniCheck(DNI_RUC_INPUT.esValido(digits) ? { estado: 'verificando' } : null);
+  };
 
   const handleDepartamentoChange = async (deptoId) => {
     setDepartamentoId(deptoId);
@@ -199,19 +238,22 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
     }
   };
 
-  const confirmarVinculacion = async () => {
-    if (!confirmVinc || guardando) return;
-    setGuardando(true);
+  // Trae el cliente ya existente a la cartera del vendedor y lo devuelve al
+  // llamador, que puede así seleccionarlo directamente (p. ej. para la venta).
+  const vincularCliente = async (clienteId) => {
+    if (!clienteId || vinculando) return;
+    setVinculando(true);
     try {
-      const { data } = await api.post(`/clientes/${confirmVinc.id}/vincular`);
-      toast.success(data.mensaje || 'Cliente vinculado a tu cartera.');
+      const { data } = await api.post(`/clientes/${clienteId}/vincular`);
+      toast.success(data.mensaje || CLIENTE_FORM.toastVinculado);
       setConfirmVinc(null);
+      setDniCheck(null);
       cerrar();
       onGuardado?.(data);
     } catch (err) {
       toast.error(err.response?.data?.error || CLIENTE_FORM.errorGenerico);
     } finally {
-      setGuardando(false);
+      setVinculando(false);
     }
   };
 
@@ -219,6 +261,55 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
     <>
     <Modal abierto={abierto} cerrar={cerrar} titulo={modoEditar ? CLIENTE_FORM.tituloEditar : CLIENTE_FORM.tituloCrear}>
       <form onSubmit={guardar} className="space-y-4">
+        {/* El documento va primero: identifica al cliente y permite avisar de
+            uno ya existente antes de que se rellene el resto del formulario. */}
+        <div>
+          <label className="block text-sm font-medium text-steel-200 mb-1">{CLIENTE_FORM.labelDni}</label>
+          <input
+            className="input-field"
+            autoFocus={!modoEditar}
+            inputMode={DNI_RUC_INPUT.INPUT_MODE}
+            pattern={DNI_RUC_INPUT.PATTERN}
+            maxLength={DNI_RUC_INPUT.MAX_LENGTH}
+            placeholder={DNI_RUC_INPUT.PLACEHOLDER}
+            value={form.dni}
+            onChange={(e) => cambiarDni(e.target.value)}
+          />
+          {!modoEditar && !dniCheck && (
+            <p className="mt-1 text-xs text-steel-500">{CLIENTE_FORM.ayudaDni}</p>
+          )}
+          {dniCheck?.estado === 'verificando' && (
+            <p className="mt-1 text-xs text-steel-400">{CLIENTE_FORM.dniVerificando}</p>
+          )}
+        </div>
+
+        {/* Al editar no se ofrece vincular: cambiaría de cliente y descartaría
+            los datos que se están modificando. Solo se avisa del conflicto. */}
+        {dniCheck?.estado === 'existe' && (
+          <div className={`rounded-lg border p-3 ${dniCheck.yaVinculado && !modoEditar
+            ? 'border-blue-500/30 bg-blue-500/5'
+            : 'border-amber-500/30 bg-amber-500/5'}`}>
+            <p className="text-sm font-medium text-steel-100">{CLIENTE_FORM.dniExisteTitulo}</p>
+            <p className="mt-1 text-xs text-steel-300">
+              {modoEditar
+                ? CLIENTE_FORM.dniExisteOcupado(dniCheck.cliente.nombre)
+                : dniCheck.yaVinculado
+                  ? CLIENTE_FORM.dniExisteEnCartera(dniCheck.cliente.nombre)
+                  : CLIENTE_FORM.dniExisteVincular(dniCheck.cliente.nombre)}
+            </p>
+            {!modoEditar && !dniCheck.yaVinculado && (
+              <button
+                type="button"
+                onClick={() => vincularCliente(dniCheck.cliente.id)}
+                disabled={vinculando}
+                className="btn-primary mt-3 text-sm py-1.5"
+              >
+                {vinculando ? CLIENTE_FORM.btnVinculando : CLIENTE_FORM.btnVincular}
+              </button>
+            )}
+          </div>
+        )}
+
         <div>
           <label className="block text-sm font-medium text-steel-200 mb-1">
             {CLIENTE_FORM.labelNombre} <span className="text-red-600">*</span>
@@ -232,18 +323,6 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">{CLIENTE_FORM.labelDni}</label>
-            <input
-              className="input-field"
-              inputMode={DNI_RUC_INPUT.INPUT_MODE}
-              pattern={DNI_RUC_INPUT.PATTERN}
-              maxLength={DNI_RUC_INPUT.MAX_LENGTH}
-              placeholder={DNI_RUC_INPUT.PLACEHOLDER}
-              value={form.dni}
-              onChange={(e) => setForm({ ...form, dni: DNI_RUC_INPUT.toDigits(e.target.value) })}
-            />
-          </div>
           <div>
             <label className="block text-sm font-medium text-steel-200 mb-1">
               {CLIENTE_FORM.labelTelefonoPrincipal} <span className="text-red-600">*</span>
@@ -260,20 +339,19 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
               required
             />
           </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-steel-200 mb-1">{CLIENTE_FORM.labelTelefonoSecundario}</label>
-          <input
-            className="input-field"
-            type="tel"
-            inputMode={TELEFONO_INPUT.INPUT_MODE}
-            pattern={TELEFONO_INPUT.PATTERN}
-            maxLength={TELEFONO_INPUT.MAX_LENGTH}
-            placeholder={TELEFONO_INPUT.PLACEHOLDER}
-            value={form.telefono_secundario}
-            onChange={(e) => setForm({ ...form, telefono_secundario: TELEFONO_INPUT.format(e.target.value) })}
-          />
+          <div>
+            <label className="block text-sm font-medium text-steel-200 mb-1">{CLIENTE_FORM.labelTelefonoSecundario}</label>
+            <input
+              className="input-field"
+              type="tel"
+              inputMode={TELEFONO_INPUT.INPUT_MODE}
+              pattern={TELEFONO_INPUT.PATTERN}
+              maxLength={TELEFONO_INPUT.MAX_LENGTH}
+              placeholder={TELEFONO_INPUT.PLACEHOLDER}
+              value={form.telefono_secundario}
+              onChange={(e) => setForm({ ...form, telefono_secundario: TELEFONO_INPUT.format(e.target.value) })}
+            />
+          </div>
         </div>
 
         <div>
@@ -449,7 +527,7 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
       mensaje={confirmVinc
         ? `Ya existe un cliente con ese DNI / RUC: ${confirmVinc.nombre}. ¿Deseas vincularlo a tu cartera?`
         : ''}
-      onConfirmar={confirmarVinculacion}
+      onConfirmar={() => vincularCliente(confirmVinc?.id)}
       onCancelar={() => setConfirmVinc(null)}
     />
     </>

@@ -179,6 +179,18 @@ export const CLIENTE_FORM = {
   toastCreado: 'Cliente creado con acceso web',
   toastActualizado: 'Cliente actualizado',
   errorGenerico: 'Error al guardar',
+  // Detección de cliente ya registrado al escribir el DNI / RUC
+  ayudaDni: 'Empieza por el documento: si el cliente ya existe te lo avisamos.',
+  dniVerificando: 'Verificando documento...',
+  dniExisteTitulo: 'Este documento ya está registrado',
+  dniExisteVincular: (nombre) =>
+    `${nombre} ya existe como cliente, pero no está en tu cartera. Puedes vincularlo en vez de crearlo de nuevo.`,
+  dniExisteEnCartera: (nombre) => `${nombre} ya está en tu cartera con este documento.`,
+  dniExisteOcupado: (nombre) =>
+    `Este documento ya pertenece a ${nombre}. Elige otro para poder guardar los cambios.`,
+  btnVincular: 'Vincular a mi cartera',
+  btnVinculando: 'Vinculando...',
+  toastVinculado: 'Cliente vinculado a tu cartera.',
 };
 
 // Tipos de movimiento puntos (Prisma enum: TipoMovimientoPuntos)

@@ -8,7 +8,7 @@ import Paginacion from '../../components/ui/Paginacion';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import toast from 'react-hot-toast';
-import { ESTADO_ACCESO, TELEFONO_INPUT } from '../../config/constants';
+import { ESTADO_ACCESO, TELEFONO_INPUT, DNI_RUC_INPUT } from '../../config/constants';
 import api from '../../api/axios';
 
 const columnas = [
@@ -24,7 +24,7 @@ const columnas = [
   { key: 'estado_acceso', label: 'Estado', render: (f) => <EstadoBadge estado={f.estado_acceso} /> },
 ];
 
-const formInicial = { nombres: '', correo: '', telefono: '', contrasena: '', id_rol: '', estado_acceso: ESTADO_ACCESO.ACTIVO, fecha_ingreso: '' };
+const formInicial = { nombres: '', correo: '', telefono: '', dni: '', contrasena: '', id_rol: '', estado_acceso: ESTADO_ACCESO.ACTIVO, fecha_ingreso: '' };
 
 export default function Usuarios() {
   const { datos, cargando, listar } = useCrud('/usuarios');
@@ -72,6 +72,7 @@ export default function Usuarios() {
       nombres: usuario.nombres,
       correo: usuario.correo,
       telefono: TELEFONO_INPUT.format(usuario.telefono || ''),
+      dni: usuario.dni || '',
       contrasena: '',
       id_rol: usuario.id_rol?.toString() || '',
       estado_acceso: usuario.estado_acceso,
@@ -88,7 +89,12 @@ export default function Usuarios() {
         toast.error(TELEFONO_INPUT.MSG_INVALIDO);
         return;
       }
-      const body = { ...form, id_rol: parseInt(form.id_rol), telefono: telefonoDigits || null };
+      const dniDigits = DNI_RUC_INPUT.toDigits(form.dni);
+      if (dniDigits && !DNI_RUC_INPUT.esValido(dniDigits)) {
+        toast.error(DNI_RUC_INPUT.MSG_INVALIDO);
+        return;
+      }
+      const body = { ...form, id_rol: parseInt(form.id_rol), telefono: telefonoDigits || null, dni: dniDigits || null };
       if (!body.contrasena) delete body.contrasena;
       if (!body.fecha_ingreso) delete body.fecha_ingreso;
       if (editando) {
@@ -199,18 +205,33 @@ export default function Usuarios() {
             <label className="block text-sm font-medium text-steel-200 mb-1">Correo</label>
             <input type="email" className="input-field" value={form.correo} onChange={(e) => setForm({ ...form, correo: e.target.value })} required />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">Teléfono</label>
-            <input
-              className="input-field"
-              type="tel"
-              inputMode={TELEFONO_INPUT.INPUT_MODE}
-              pattern={TELEFONO_INPUT.PATTERN}
-              maxLength={TELEFONO_INPUT.MAX_LENGTH}
-              placeholder={TELEFONO_INPUT.PLACEHOLDER}
-              value={form.telefono}
-              onChange={(e) => setForm({ ...form, telefono: TELEFONO_INPUT.format(e.target.value) })}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-steel-200 mb-1">Teléfono</label>
+              <input
+                className="input-field"
+                type="tel"
+                inputMode={TELEFONO_INPUT.INPUT_MODE}
+                pattern={TELEFONO_INPUT.PATTERN}
+                maxLength={TELEFONO_INPUT.MAX_LENGTH}
+                placeholder={TELEFONO_INPUT.PLACEHOLDER}
+                value={form.telefono}
+                onChange={(e) => setForm({ ...form, telefono: TELEFONO_INPUT.format(e.target.value) })}
+              />
+            </div>
+            <div>
+              {/* El DNI del chofer se imprime como remitente en el rótulo de venta. */}
+              <label className="block text-sm font-medium text-steel-200 mb-1">DNI</label>
+              <input
+                className="input-field"
+                inputMode={DNI_RUC_INPUT.INPUT_MODE}
+                pattern={DNI_RUC_INPUT.PATTERN}
+                maxLength={DNI_RUC_INPUT.MAX_LENGTH}
+                placeholder={DNI_RUC_INPUT.PLACEHOLDER}
+                value={form.dni}
+                onChange={(e) => setForm({ ...form, dni: DNI_RUC_INPUT.toDigits(e.target.value) })}
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-steel-200 mb-1">Contraseña {editando && '(dejar vacío para no cambiar)'}</label>

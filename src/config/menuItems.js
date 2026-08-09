@@ -20,6 +20,7 @@ import {
   HiOutlineClock,
   HiOutlineCollection,
   HiOutlineCash,
+  HiOutlineOfficeBuilding,
 } from 'react-icons/hi';
 import { ROLES } from './roles';
 
@@ -98,6 +99,7 @@ export const menuPorRol = {
     { label: 'Recepción', path: '/almacen/recepcion', icon: HiOutlineClipboardList },
     { label: 'Recep. Importaciones', path: '/almacen/recepcion-importaciones', icon: HiOutlineGlobe },
     { label: 'Despacho', path: '/almacen/despacho', icon: HiOutlineTruck },
+    { label: 'Entregas Agencia', path: '/almacen/entregas', icon: HiOutlineOfficeBuilding },
     { label: 'Escáner de Salida', path: '/almacen/escaner-salida', icon: HiOutlineQrcode },
     { label: 'Banco Fotos', path: '/almacen/banco-fotos', icon: HiOutlineCamera },
     { label: 'Inventario', path: '/almacen/inventario', icon: HiOutlineCube },
@@ -107,10 +109,9 @@ export const menuPorRol = {
     { label: 'Entregas', path: '/chofer/entregas', icon: HiOutlineTruck },
     { label: 'Compras disponibles', path: '/chofer/compras-disponibles', icon: HiOutlineShoppingCart },
   ],
-  [ROLES.CONTROL_ASISTENCIA]: [
-    { label: 'Dashboard', path: '/control-asistencia/dashboard', icon: HiOutlineHome },
-    { label: 'Escáner QR', path: '/control-asistencia/escaner', icon: HiOutlineQrcode },
-    { label: 'Historial', path: '/control-asistencia/historial', icon: HiOutlineClipboardList },
+  [ROLES.MARKETING_INOVACION]: [
+    { label: 'Dashboard', path: '/marketing/dashboard', icon: HiOutlineHome },
+    { label: 'Análisis Mkt', path: '/administrador/analisis-marketing', icon: HiOutlineChartBar },
   ],
   [ROLES.CLIENTE]: [
     { label: 'Dashboard', path: '/cliente/dashboard', icon: HiOutlineHome },
