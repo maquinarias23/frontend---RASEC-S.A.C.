@@ -765,11 +765,14 @@ export default function Despacho() {
     return {
       codigo: codigoRotulo,
       ventaId: venta?.id,
+      // El REMITENTE del rótulo es la empresa (razón social, RUC, dirección y
+      // teléfono vienen de la configuración de facturación). El conductor NO se
+      // imprime: solo identifica quién lleva el envío dentro del sistema.
       empresa: empresa || null,
       es_externo: chofer?.externo || false,
-      remitente_nombre: chofer?.nombres || '',
-      remitente_dni: chofer?.dni || '',
-      remitente_telefono: chofer?.telefono || '',
+      conductor_nombre: chofer?.nombres || '',
+      conductor_dni: chofer?.dni || '',
+      conductor_telefono: chofer?.telefono || '',
       destinatario_nombre,
       destinatario_dni,
       destinatario_telefono,
@@ -867,21 +870,22 @@ export default function Despacho() {
     }
   };
 
-  // Previsualiza el cambio de conductor en el preview (sin persistir).
-  // Usado por el onChange del <select> durante la edición.
+  // Refleja el cambio de conductor en el estado del rótulo (sin persistir).
+  // Usado por el onChange del <select> durante la edición. No afecta lo impreso:
+  // el conductor solo se muestra en este modal.
   const previsualizarCambioChofer = (choferId) => {
     setChoferSeleccionado(choferId);
     if (!rotuloData) return;
     const chofer = resolverChofer(choferes, choferId);
     setRotuloData((prev) => ({
       ...prev,
-      remitente_nombre: chofer?.nombres || '',
-      remitente_dni: chofer?.dni || '',
-      remitente_telefono: chofer?.telefono || '',
+      conductor_nombre: chofer?.nombres || '',
+      conductor_dni: chofer?.dni || '',
+      conductor_telefono: chofer?.telefono || '',
     }));
   };
 
-  // Previsualiza en el rótulo los datos del conductor externo mientras se tipean.
+  // Refleja los datos del conductor externo en el modal mientras se tipean.
   const previsualizarDatoExterno = (campo, valor) => {
     setDatosExterno((prev) => {
       const actualizado = { ...prev, [campo]: valor };
@@ -889,9 +893,9 @@ export default function Despacho() {
         setRotuloData((r) => ({
           ...r,
           es_externo: true,
-          remitente_nombre: actualizado.nombre,
-          remitente_dni: actualizado.dni,
-          remitente_telefono: actualizado.telefono,
+          conductor_nombre: actualizado.nombre,
+          conductor_dni: actualizado.dni,
+          conductor_telefono: actualizado.telefono,
         }));
       }
       return actualizado;
@@ -936,9 +940,9 @@ export default function Despacho() {
     setConductorExterno(!!eraExterno);
     if (eraExterno) {
       setDatosExterno({
-        nombre: rotuloData?.remitente_nombre || '',
-        dni: rotuloData?.remitente_dni || '',
-        telefono: rotuloData?.remitente_telefono || '',
+        nombre: rotuloData?.conductor_nombre || '',
+        dni: rotuloData?.conductor_dni || '',
+        telefono: rotuloData?.conductor_telefono || '',
       });
     } else {
       const chofer = resolverChofer(choferes, choferPrevioEdicion);
@@ -946,9 +950,9 @@ export default function Despacho() {
         setRotuloData((prev) => ({
           ...prev,
           es_externo: false,
-          remitente_nombre: chofer?.nombres || '',
-          remitente_dni: chofer?.dni || '',
-          remitente_telefono: chofer?.telefono || '',
+          conductor_nombre: chofer?.nombres || '',
+          conductor_dni: chofer?.dni || '',
+          conductor_telefono: chofer?.telefono || '',
         }));
       }
     }
@@ -964,14 +968,14 @@ export default function Despacho() {
       if (rotuloData) {
         setRotuloData((prev) => ({
           ...prev, es_externo: true,
-          remitente_nombre: datosExterno.nombre, remitente_dni: datosExterno.dni, remitente_telefono: datosExterno.telefono,
+          conductor_nombre: datosExterno.nombre, conductor_dni: datosExterno.dni, conductor_telefono: datosExterno.telefono,
         }));
       }
     } else {
       if (rotuloData) {
         setRotuloData((prev) => ({
           ...prev, es_externo: false,
-          remitente_nombre: '', remitente_dni: '', remitente_telefono: '',
+          conductor_nombre: '', conductor_dni: '', conductor_telefono: '',
         }));
       }
     }
@@ -1016,7 +1020,7 @@ export default function Despacho() {
       <p className="text-[10px] text-blue-600 mt-1">
         {conductorExterno
           ? 'Registre los datos del conductor externo. Almacén completa el envío y la entrega en agencia.'
-          : 'Los datos del conductor se usarán como remitente en el rótulo'}
+          : 'Queda registrado como responsable del envío. El rótulo imprime a la empresa como remitente.'}
       </p>
     </>
   );
@@ -1591,7 +1595,7 @@ export default function Despacho() {
           <div className="bg-blue-50 border-2 border-blue-400 rounded-lg p-3">
             <label className="flex items-center gap-2 text-xs font-semibold text-blue-700 mb-2 uppercase tracking-wider">
               <HiOutlineUser className="w-4 h-4" />
-              Conductor (remitente) *
+              Conductor asignado *
             </label>
 
             {/* Modo CREAR: aún no existe rótulo → toggle + selector/inputs */}
@@ -1602,14 +1606,14 @@ export default function Despacho() {
               <div className="flex items-start justify-between gap-2">
                 <div className="text-xs text-steel-700">
                   <p className="font-semibold text-steel-800 flex items-center gap-2">
-                    {rotuloData.remitente_nombre || '-'}
+                    {rotuloData.conductor_nombre || '-'}
                     {rotuloData.es_externo && (
                       <span className="text-[10px] font-bold uppercase bg-amber-500 text-white px-1.5 py-0.5 rounded">Externo</span>
                     )}
                   </p>
                   <p className="text-steel-600">
-                    {rotuloData.remitente_dni ? `DNI: ${rotuloData.remitente_dni}` : 'Sin DNI'}
-                    {rotuloData.remitente_telefono ? ` — Tel: ${TELEFONO_INPUT.format(rotuloData.remitente_telefono)}` : ''}
+                    {rotuloData.conductor_dni ? `DNI: ${rotuloData.conductor_dni}` : 'Sin DNI'}
+                    {rotuloData.conductor_telefono ? ` — Tel: ${TELEFONO_INPUT.format(rotuloData.conductor_telefono)}` : ''}
                   </p>
                 </div>
                 <button
@@ -1691,7 +1695,8 @@ export default function Despacho() {
           {rotuloData && (
             <>
             <div id="rotulo-print" className="bg-white rounded-xl overflow-hidden border-2 border-steel-600">
-              {/* Header con logo y datos legales de la empresa */}
+              {/* Membrete: logo + razón social. RUC, dirección y teléfono no se
+                   repiten aquí porque el bloque REMITENTE ya los imprime. */}
               <div className="flex items-center gap-3 px-4 py-3" style={{ background: '#DC2626' }}>
                 <img src="/logo-rasec.png" alt="Logo" className="w-12 h-12 rounded-md bg-white p-0.5 object-contain shrink-0" />
                 <div className="min-w-0">
@@ -1699,12 +1704,6 @@ export default function Despacho() {
                   <p className="text-white/90 text-[10px] tracking-[0.08em] font-semibold leading-tight mt-0.5">
                     {rotuloData.empresa?.razon_social || 'MAQUINARIA RASEC S.A.C.'}
                   </p>
-                  {rotuloData.empresa?.ruc && (
-                    <p className="text-white/80 text-[10px] font-medium leading-tight">RUC: {rotuloData.empresa.ruc}</p>
-                  )}
-                  {rotuloData.empresa?.direccion && (
-                    <p className="text-white/75 text-[9px] leading-tight">{rotuloData.empresa.direccion}</p>
-                  )}
                 </div>
               </div>
 
@@ -1714,13 +1713,16 @@ export default function Despacho() {
                 <p className="text-[28px] font-display tracking-[4px] leading-tight" style={{ color: '#DC2626' }}>{rotuloData.codigo}</p>
               </div>
 
-              {/* Remitente (datos del chofer) */}
+              {/* Remitente: la EMPRESA. Sale de la configuración de facturación
+                   (/administrador/configuracion-facturacion), la misma fuente que
+                   los comprobantes electrónicos. El conductor no se imprime. */}
               <div className="px-4 py-2.5 border-b border-gray-200">
                 <p className="text-[9px] font-bold uppercase tracking-[1.5px] pb-0.5 mb-1.5 inline-block" style={{ color: '#DC2626', borderBottom: '1.5px solid #DC2626' }}>Remitente (quien envía)</p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
-                  <div><span className="text-gray-400">Nombre: </span><span className="font-bold text-gray-900">{rotuloData.remitente_nombre || '-'}</span></div>
-                  <div><span className="text-gray-400">DNI: </span><span className="font-bold text-gray-900">{rotuloData.remitente_dni || '-'}</span></div>
-                  <div className="col-span-2"><span className="text-gray-400">Teléfono: </span><span className="font-bold text-gray-900">{TELEFONO_INPUT.format(rotuloData.remitente_telefono) || '-'}</span></div>
+                <div className="space-y-0.5 text-xs">
+                  <div><span className="text-gray-400">Razón social: </span><span className="font-bold text-gray-900">{rotuloData.empresa?.razon_social || 'MAQUINARIA RASEC S.A.C.'}</span></div>
+                  <div><span className="text-gray-400">RUC: </span><span className="font-bold text-gray-900">{rotuloData.empresa?.ruc || '-'}</span></div>
+                  <div><span className="text-gray-400">Dirección: </span><span className="font-bold text-gray-900">{rotuloData.empresa?.direccion || '-'}</span></div>
+                  <div><span className="text-gray-400">Teléfono: </span><span className="font-bold text-gray-900">{TELEFONO_INPUT.format(rotuloData.empresa?.telefono) || '-'}</span></div>
                 </div>
               </div>
 
@@ -1788,9 +1790,6 @@ export default function Despacho() {
               onClick={() => {
                 const d = rotuloData;
                 const logoUrl = window.location.origin + '/logo-rasec.png';
-                const remNombre = esc(d.remitente_nombre) || '-';
-                const remDni = esc(d.remitente_dni) || '-';
-                const remTel = esc(TELEFONO_INPUT.format(d.remitente_telefono)) || '-';
                 const destNombre = esc(d.destinatario_nombre) || '-';
                 const destDni = esc(d.destinatario_dni) || '-';
                 const destTel = esc(TELEFONO_INPUT.format(d.destinatario_telefono)) || '-';
@@ -1800,9 +1799,11 @@ export default function Despacho() {
                   ? esc(d.destinatario_documento)
                   : '';
                 const destObs = esc(d.destinatario_observacion);
+                // Bloque REMITENTE: la empresa, desde la configuración de facturación.
                 const empRazon = esc(d.empresa?.razon_social) || 'MAQUINARIA RASEC S.A.C.';
-                const empRuc = esc(d.empresa?.ruc);
-                const empDir = esc(d.empresa?.direccion);
+                const empRuc = esc(d.empresa?.ruc) || '-';
+                const empDir = esc(d.empresa?.direccion) || '-';
+                const empTel = esc(TELEFONO_INPUT.format(d.empresa?.telefono)) || '-';
                 const dirCompleta = esc((d.direccion_manual || d.direccion || '-') + (d.distrito ? `, ${d.distrito}` : ''));
                 const depto = esc((d.departamento || '') + (d.provincia ? ` - ${d.provincia}` : ''));
                 const ventana = window.open('', '_blank');
@@ -1818,8 +1819,6 @@ body{font-family:'Barlow',Arial,sans-serif;margin:0 auto;color:#1a1a1a;-webkit-p
 .hdr img{width:clamp(36px,8vw,52px);height:clamp(36px,8vw,52px);border-radius:6px;background:#fff;padding:3px;object-fit:contain}
 .brand{font-family:'Bebas Neue',Impact,sans-serif;font-size:clamp(16px,4vw,24px);color:#fff;letter-spacing:3px;line-height:1.05}
 .brand-sub{font-size:clamp(8px,1.5vw,11px);color:rgba(255,255,255,.95);letter-spacing:.5px;font-weight:600;line-height:1.25;margin-top:2px}
-.brand-doc{font-size:clamp(7px,1.3vw,10px);color:rgba(255,255,255,.9);font-weight:500;line-height:1.25}
-.brand-dir{font-size:clamp(7px,1.2vw,9px);color:rgba(255,255,255,.8);line-height:1.25}
 .code-box{text-align:center;padding:clamp(6px,1.5vw,10px) clamp(10px,3vw,18px) clamp(8px,2vw,12px);background:#f8f8f8;border-bottom:2.5px solid #1a1a1a}
 .code-lbl{font-size:clamp(7px,1.2vw,9px);text-transform:uppercase;letter-spacing:2.5px;color:#999;font-weight:600}
 .code-val{font-family:'Bebas Neue',monospace;font-size:clamp(22px,5vw,34px);letter-spacing:clamp(2px,0.8vw,5px);color:#DC2626;margin-top:2px}
@@ -1827,7 +1826,7 @@ body{font-family:'Barlow',Arial,sans-serif;margin:0 auto;color:#1a1a1a;-webkit-p
 .sec.last{border-bottom:2.5px solid #1a1a1a}
 .sec-t{font-size:clamp(7px,1.2vw,9px);font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#DC2626;padding-bottom:3px;margin-bottom:7px;border-bottom:1.5px solid #DC2626;display:inline-block}
 .row{display:flex;font-size:clamp(9px,1.8vw,12px);margin:3px 0;gap:8px;flex-wrap:wrap}
-.lbl{color:#777;min-width:clamp(50px,12vw,68px);font-weight:500}
+.lbl{color:#777;min-width:clamp(58px,14vw,84px);font-weight:500}
 .val{font-weight:700;color:#1a1a1a;word-break:break-word}
 .val.ac{color:#DC2626}
 .ftr{padding:clamp(6px,1.5vw,10px) clamp(10px,3vw,18px);display:flex;justify-content:space-between;align-items:center;background:#f8f8f8;border-bottom:1px solid #e0e0e0}
@@ -1838,12 +1837,13 @@ body{font-family:'Barlow',Arial,sans-serif;margin:0 auto;color:#1a1a1a;-webkit-p
 @media print{body{padding:0;margin:0 auto;width:100%}@page{margin:5mm}.label{border-width:1.5px}}
 </style></head><body>
 <div class="label">
-<div class="hdr"><img src="${logoUrl}" alt="Logo"><div><div class="brand">RASEC</div><div class="brand-sub">${empRazon}</div>${empRuc ? `<div class="brand-doc">RUC: ${empRuc}</div>` : ''}${empDir ? `<div class="brand-dir">${empDir}</div>` : ''}</div></div>
+<div class="hdr"><img src="${logoUrl}" alt="Logo"><div><div class="brand">RASEC</div><div class="brand-sub">${empRazon}</div></div></div>
 <div class="code-box"><div class="code-lbl">Código de Venta</div><div class="code-val">${esc(d.codigo)}</div></div>
 <div class="sec"><div class="sec-t">Remitente (quien envía)</div>
-<div class="row"><span class="lbl">Nombre:</span><span class="val">${remNombre}</span></div>
-<div class="row"><span class="lbl">DNI:</span><span class="val">${remDni}</span></div>
-<div class="row"><span class="lbl">Teléfono:</span><span class="val">${remTel}</span></div></div>
+<div class="row"><span class="lbl">Razón social:</span><span class="val">${empRazon}</span></div>
+<div class="row"><span class="lbl">RUC:</span><span class="val">${empRuc}</span></div>
+<div class="row"><span class="lbl">Dirección:</span><span class="val">${empDir}</span></div>
+<div class="row"><span class="lbl">Teléfono:</span><span class="val">${empTel}</span></div></div>
 <div class="sec"><div class="sec-t">Destinatario (quien recibe)</div>
 <div class="row"><span class="lbl">Nombre:</span><span class="val">${destNombre}</span></div>
 <div class="row"><span class="lbl">DNI:</span><span class="val">${destDni}</span></div>

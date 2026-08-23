@@ -43,12 +43,10 @@ export function generarRotuloVentaESCPOS(data, opts = {}) {
 
   const enc = new ESCPOSEncoder();
 
+  // Membrete: solo la razón social. RUC/dirección/teléfono no se repiten aquí
+  // porque el bloque REMITENTE de más abajo ya los imprime.
   enc.align('center').size('double').bold(true).text(d.empresaRazon);
   enc.size('normal').bold(false);
-  if (d.empresaRuc) enc.text(`RUC: ${d.empresaRuc}`);
-  if (d.empresaDireccion) {
-    for (const ln of wrapTextoChars(d.empresaDireccion, w)) enc.text(ln);
-  }
   enc.line('=', w);
 
   enc.align('center').text('Codigo de Venta');
@@ -56,11 +54,19 @@ export function generarRotuloVentaESCPOS(data, opts = {}) {
   enc.size('normal').bold(false);
   enc.line('=', w);
 
+  // Remitente = la empresa (configuración de facturación), no el conductor.
   enc.align('left').bold(true).text('REMITENTE');
   enc.bold(false);
-  for (const ln of wrapTextoChars(`Nombre: ${d.remNombre}`, w)) enc.text(ln);
-  for (const ln of wrapTextoChars(`DNI:    ${d.remDni}`, w)) enc.text(ln);
-  for (const ln of wrapTextoChars(`Tel:    ${d.remTel}`, w)) enc.text(ln);
+  for (const ln of wrapTextoChars(`Razon:  ${d.empresaRazon}`, w)) enc.text(ln);
+  if (d.empresaRuc) {
+    for (const ln of wrapTextoChars(`RUC:    ${d.empresaRuc}`, w)) enc.text(ln);
+  }
+  if (d.empresaDireccion) {
+    for (const ln of wrapTextoChars(`Dir:    ${d.empresaDireccion}`, w)) enc.text(ln);
+  }
+  if (d.empresaTelefono) {
+    for (const ln of wrapTextoChars(`Tel:    ${d.empresaTelefono}`, w)) enc.text(ln);
+  }
   enc.line('-', w);
 
   enc.bold(true).text('DESTINATARIO');

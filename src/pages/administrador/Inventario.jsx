@@ -1,25 +1,30 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   HiOutlineSearch, HiOutlineAdjustments, HiOutlineClipboardList,
   HiOutlineTruck, HiOutlineShoppingCart, HiOutlineOfficeBuilding,
-  HiOutlineChevronDown, HiOutlineChevronUp,
+  HiOutlineChevronDown, HiOutlineChevronUp, HiOutlineDocumentSearch,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import TablaGenerica from '../../components/ui/TablaGenerica';
 import Modal from '../../components/ui/Modal';
 import Tabs from '../../components/ui/Tabs';
 import TablaProximosIngresos from '../../components/shared/TablaProximosIngresos';
+import HistorialAjustesInventario from '../../components/shared/HistorialAjustesInventario';
 import useAuthStore from '../../store/authStore';
 import { ROLES } from '../../config/roles';
-import { formatearMoneda } from '../../utils/formato';
+import { AJUSTE_INVENTARIO, TIPO_MOVIMIENTO, ORIGEN_AJUSTE, ORIGEN_AJUSTE_LABEL } from '../../config/constants';
+import { formatearFecha, formatearMoneda } from '../../utils/formato';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
-const tabsInventario = [
-  { key: 'stock', label: 'Stock Actual', icono: <HiOutlineClipboardList className="w-4 h-4 inline" /> },
-  { key: 'llegadas', label: 'Llegadas de Importación', icono: <HiOutlineTruck className="w-4 h-4 inline" /> },
-  { key: 'compras_nacionales', label: 'Compras Nacionales', icono: <HiOutlineShoppingCart className="w-4 h-4 inline" /> },
-];
+// Roles que pueden ajustar stock manualmente. ALMACEN entra porque es quien
+// hace el conteo físico; cada ajuste suyo queda en el historial auditable.
+const ROLES_PUEDEN_AJUSTAR = [ROLES.SUPER_ADMINISTRADOR, ROLES.ADMINISTRADOR, ROLES.ALMACEN];
+
+const AJUSTE_VACIO = {
+  product_id: '', tipo: TIPO_MOVIMIENTO.INGRESO, cantidad: '', motivo_texto: '',
+  costo_unitario: '', almacen_id: '', origen_ajuste: '', importacion_id: '', compra_id: '',
+};
 
 export default function Inventario() {
   const [tabActual, setTabActual] = useState('stock');
@@ -27,6 +32,20 @@ export default function Inventario() {
   const { datos: almacenes } = useCrud('/almacenes');
   const { usuario } = useAuthStore();
   const esSuperAdmin = usuario?.rol === ROLES.SUPER_ADMINISTRADOR;
+  const puedeAjustar = ROLES_PUEDEN_AJUSTAR.includes(usuario?.rol);
+
+  // El historial de ajustes es exclusivo del SUPER_ADMINISTRADOR.
+  const tabsInventario = useMemo(() => {
+    const tabs = [
+      { key: 'stock', label: 'Stock Actual', icono: <HiOutlineClipboardList className="w-4 h-4 inline" /> },
+      { key: 'llegadas', label: 'Llegadas de Importación', icono: <HiOutlineTruck className="w-4 h-4 inline" /> },
+      { key: 'compras_nacionales', label: 'Compras Nacionales', icono: <HiOutlineShoppingCart className="w-4 h-4 inline" /> },
+    ];
+    if (esSuperAdmin) {
+      tabs.push({ key: 'historial_ajustes', label: 'Historial de Ajustes', icono: <HiOutlineDocumentSearch className="w-4 h-4 inline" /> });
+    }
+    return tabs;
+  }, [esSuperAdmin]);
 
   const [busqueda, setBusqueda] = useState('');
   const [categoriaFiltro, setCategoriaFiltro] = useState('');
@@ -36,8 +55,14 @@ export default function Inventario() {
 
   // Modal ajuste
   const [modalAjuste, setModalAjuste] = useState(false);
-  const [ajuste, setAjuste] = useState({ product_id: '', tipo: 'ingreso', cantidad: '', motivo_texto: '', costo_unitario: '', almacen_id: '' });
+  const [ajuste, setAjuste] = useState(AJUSTE_VACIO);
   const [guardando, setGuardando] = useState(false);
+
+  // Documentos (importaciones / compras nacionales) que pueden declararse como
+  // origen del ajuste. Se piden por producto para ofrecer primero los lotes que
+  // sí lo incluyen.
+  const [origenes, setOrigenes] = useState({ importaciones: [], compras: [] });
+  const [cargandoOrigenes, setCargandoOrigenes] = useState(false);
 
   // Combobox producto
   const [textoProducto, setTextoProducto] = useState('');
@@ -45,6 +70,10 @@ export default function Inventario() {
   const comboRef = useRef(null);
 
   const almacenesActivos = almacenes.filter(a => a.activo);
+
+  // La importación exige documento; la compra nacional no. El selector de lote
+  // es el mismo control para ambos casos, así que se ramifica por esta bandera.
+  const esOrigenImportacion = ajuste.origen_ajuste === ORIGEN_AJUSTE.IMPORTACION;
 
   const productosFiltrados = datos.filter(p =>
     p.nombre.toLowerCase().includes(textoProducto.toLowerCase())
@@ -57,6 +86,22 @@ export default function Inventario() {
     document.addEventListener('mousedown', handleClickFuera);
     return () => document.removeEventListener('mousedown', handleClickFuera);
   }, []);
+
+  // Los orígenes se recargan al cambiar de producto porque el marcado de
+  // "incluye este producto" depende de él.
+  useEffect(() => {
+    if (!modalAjuste || !ajuste.product_id) {
+      setOrigenes({ importaciones: [], compras: [] });
+      return;
+    }
+    let cancelado = false;
+    setCargandoOrigenes(true);
+    api.get('/inventario/origenes-ajuste', { params: { product_id: ajuste.product_id } })
+      .then(({ data }) => { if (!cancelado) setOrigenes({ importaciones: data.importaciones || [], compras: data.compras || [] }); })
+      .catch(() => { if (!cancelado) toast.error('No se pudieron cargar las importaciones y compras'); })
+      .finally(() => { if (!cancelado) setCargandoOrigenes(false); });
+    return () => { cancelado = true; };
+  }, [modalAjuste, ajuste.product_id]);
 
   const categorias = [...new Set(datos.map(p => p.categoria).filter(Boolean))].sort();
 
@@ -132,23 +177,40 @@ export default function Inventario() {
     if (!ajuste.almacen_id) {
       return toast.error('Debe seleccionar un almacén');
     }
+    if (parseInt(ajuste.cantidad) > AJUSTE_INVENTARIO.MAX_CANTIDAD) {
+      return toast.error(`La cantidad no puede superar ${AJUSTE_INVENTARIO.MAX_CANTIDAD} unidades por ajuste`);
+    }
+    // El motivo es lo que el SUPER_ADMINISTRADOR leerá en el historial: sin él
+    // el ajuste queda sin justificación y el backend lo rechaza igual.
+    const motivo = ajuste.motivo_texto.trim();
+    if (motivo.length < AJUSTE_INVENTARIO.MOTIVO_MIN_LENGTH) {
+      return toast.error(`El motivo es obligatorio (mínimo ${AJUSTE_INVENTARIO.MOTIVO_MIN_LENGTH} caracteres)`);
+    }
+    if (!ajuste.origen_ajuste) {
+      return toast.error('Indica de dónde viene el ajuste: importación, compra nacional o sin lote asociado');
+    }
+    if (ajuste.origen_ajuste === ORIGEN_AJUSTE.IMPORTACION && !ajuste.importacion_id) {
+      return toast.error('Selecciona la importación de la que proviene el ajuste');
+    }
     setGuardando(true);
     try {
       const payload = {
         product_id: parseInt(ajuste.product_id),
         tipo: ajuste.tipo,
         cantidad: parseInt(ajuste.cantidad),
-        motivo_texto: ajuste.motivo_texto,
+        motivo_texto: motivo,
         almacen_id: parseInt(ajuste.almacen_id),
+        origen_ajuste: ajuste.origen_ajuste,
       };
-      if (ajuste.tipo === 'ingreso' && ajuste.costo_unitario !== '') {
+      if (ajuste.origen_ajuste === ORIGEN_AJUSTE.IMPORTACION) payload.importacion_id = parseInt(ajuste.importacion_id);
+      // La compra concreta es opcional: solo viaja si el usuario eligió una.
+      if (ajuste.origen_ajuste === ORIGEN_AJUSTE.COMPRA_LOCAL && ajuste.compra_id) payload.compra_id = parseInt(ajuste.compra_id);
+      if (ajuste.tipo === TIPO_MOVIMIENTO.INGRESO && ajuste.costo_unitario !== '') {
         payload.costo_unitario = parseFloat(ajuste.costo_unitario);
       }
       const { data } = await api.post('/inventario/ajustar', payload);
       toast.success(data.mensaje);
-      setModalAjuste(false);
-      setAjuste({ product_id: '', tipo: 'ingreso', cantidad: '', motivo_texto: '', costo_unitario: '', almacen_id: '' });
-      setTextoProducto('');
+      cerrarModalAjuste();
       listar();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Error al ajustar inventario');
@@ -157,11 +219,17 @@ export default function Inventario() {
     }
   };
 
+  const cerrarModalAjuste = () => {
+    setModalAjuste(false);
+    setAjuste(AJUSTE_VACIO);
+    setTextoProducto('');
+  };
+
   return (
     <div>
       <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
         <h1 className="text-2xl font-bold font-display tracking-wider text-steel-100">Inventario</h1>
-        {tabActual === 'stock' && esSuperAdmin && (
+        {tabActual === 'stock' && puedeAjustar && (
           <button onClick={() => setModalAjuste(true)} className="btn-primary flex items-center gap-2">
             <HiOutlineAdjustments className="w-4 h-4" /> Ajustar Inventario
           </button>
@@ -172,6 +240,9 @@ export default function Inventario() {
 
       {tabActual === 'llegadas' && <TablaProximosIngresos soloImportaciones mostrarCardRetrasadas />}
       {tabActual === 'compras_nacionales' && <TablaProximosIngresos soloCompras />}
+      {tabActual === 'historial_ajustes' && esSuperAdmin && (
+        <HistorialAjustesInventario almacenes={almacenesActivos} productos={datos} />
+      )}
 
       {tabActual === 'stock' && <>
       {/* Filtros */}
@@ -250,8 +321,12 @@ export default function Inventario() {
       </>}
 
       {/* Modal Ajustar Inventario */}
-      <Modal abierto={modalAjuste} cerrar={() => { setModalAjuste(false); setTextoProducto(''); setAjuste({ product_id: '', tipo: 'ingreso', cantidad: '', motivo_texto: '', costo_unitario: '', almacen_id: '' }); }} titulo="Ajustar Inventario">
+      <Modal abierto={modalAjuste} cerrar={cerrarModalAjuste} titulo="Ajustar Inventario">
         <div className="space-y-4">
+          <p className="text-xs text-steel-400 bg-steel-800/50 border border-steel-700 rounded-lg p-3">
+            Cada ajuste queda registrado con tu usuario, la fecha y hora exactas, el motivo y el
+            lote del que proviene. El Super Administrador puede revisar ese historial.
+          </p>
           <div>
             <label className="label-field">Producto</label>
             <div ref={comboRef} className="relative">
@@ -317,14 +392,71 @@ export default function Inventario() {
           </div>
 
           <div>
+            <label className="label-field">Origen del Ajuste *</label>
+            <select
+              className="input-field w-full"
+              value={ajuste.origen_ajuste}
+              onChange={(e) => setAjuste({ ...ajuste, origen_ajuste: e.target.value, importacion_id: '', compra_id: '' })}
+            >
+              <option value="">-- ¿De dónde viene esta mercadería? --</option>
+              <option value={ORIGEN_AJUSTE.IMPORTACION}>{ORIGEN_AJUSTE_LABEL[ORIGEN_AJUSTE.IMPORTACION]}</option>
+              <option value={ORIGEN_AJUSTE.COMPRA_LOCAL}>{ORIGEN_AJUSTE_LABEL[ORIGEN_AJUSTE.COMPRA_LOCAL]}</option>
+              <option value={ORIGEN_AJUSTE.OTRO}>{ORIGEN_AJUSTE_LABEL[ORIGEN_AJUSTE.OTRO]} (merma, daño, corrección de conteo)</option>
+            </select>
+          </div>
+
+          {(ajuste.origen_ajuste === ORIGEN_AJUSTE.IMPORTACION || ajuste.origen_ajuste === ORIGEN_AJUSTE.COMPRA_LOCAL) && (
+            <div>
+              <label className="label-field">
+                {esOrigenImportacion ? 'Importación de procedencia *' : (
+                  <>Compra nacional de procedencia <span className="text-steel-400 font-normal">(opcional)</span></>
+                )}
+              </label>
+              {!ajuste.product_id ? (
+                <p className="text-xs text-amber-500">Selecciona primero el producto para listar los lotes.</p>
+              ) : cargandoOrigenes ? (
+                <p className="text-xs text-steel-400">Cargando lotes…</p>
+              ) : (
+                <>
+                  <select
+                    className="input-field w-full"
+                    value={esOrigenImportacion ? ajuste.importacion_id : ajuste.compra_id}
+                    onChange={(e) => setAjuste({
+                      ...ajuste,
+                      [esOrigenImportacion ? 'importacion_id' : 'compra_id']: e.target.value,
+                    })}
+                  >
+                    <option value="">
+                      {esOrigenImportacion ? '-- Seleccionar --' : '-- Sin compra específica --'}
+                    </option>
+                    {(esOrigenImportacion ? origenes.importaciones : origenes.compras).map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.incluye_producto ? '★ ' : ''}{o.etiqueta}
+                        {o.proveedor ? ` — ${o.proveedor}` : ''}
+                        {o.fecha ? ` — ${formatearFecha(o.fecha)}` : ''}
+                        {o.incluye_producto ? ` (incluye ${o.cantidad_producto} u. del producto)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-steel-400 mt-1">
+                    ★ = el lote incluye este producto. Puedes elegir uno sin la estrella si la mercadería
+                    llegó fuera de su lista de ítems.
+                    {!esOrigenImportacion && ' Déjalo sin seleccionar si no hay una compra concreta que asociar.'}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
+          <div>
             <label className="label-field">Tipo de Ajuste</label>
             <div className="flex gap-4 mt-1">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="radio"
                   name="tipoAjuste"
-                  value="ingreso"
-                  checked={ajuste.tipo === 'ingreso'}
+                  value={TIPO_MOVIMIENTO.INGRESO}
+                  checked={ajuste.tipo === TIPO_MOVIMIENTO.INGRESO}
                   onChange={(e) => setAjuste({ ...ajuste, tipo: e.target.value })}
                   className="text-primary-500"
                 />
@@ -334,8 +466,8 @@ export default function Inventario() {
                 <input
                   type="radio"
                   name="tipoAjuste"
-                  value="salida"
-                  checked={ajuste.tipo === 'salida'}
+                  value={TIPO_MOVIMIENTO.SALIDA}
+                  checked={ajuste.tipo === TIPO_MOVIMIENTO.SALIDA}
                   onChange={(e) => setAjuste({ ...ajuste, tipo: e.target.value })}
                   className="text-primary-500"
                 />
@@ -349,6 +481,7 @@ export default function Inventario() {
             <input
               type="number"
               min="1"
+              max={AJUSTE_INVENTARIO.MAX_CANTIDAD}
               className="input-field w-full"
               value={ajuste.cantidad}
               onChange={(e) => setAjuste({ ...ajuste, cantidad: e.target.value })}
@@ -356,7 +489,7 @@ export default function Inventario() {
             />
           </div>
 
-          {ajuste.tipo === 'ingreso' && (
+          {ajuste.tipo === TIPO_MOVIMIENTO.INGRESO && (
             <div>
               <label className="label-field">Costo Unitario <span className="text-steel-400 font-normal">(opcional)</span></label>
               <input
@@ -372,18 +505,22 @@ export default function Inventario() {
           )}
 
           <div>
-            <label className="label-field">Motivo del Ajuste</label>
+            <label className="label-field">Motivo del Ajuste *</label>
             <textarea
               className="input-field w-full"
               rows={3}
+              maxLength={AJUSTE_INVENTARIO.MOTIVO_MAX_LENGTH}
               value={ajuste.motivo_texto}
               onChange={(e) => setAjuste({ ...ajuste, motivo_texto: e.target.value })}
-              placeholder="Ej: Correccion por inventario fisico, producto danado, etc."
+              placeholder="Ej: Corrección por conteo físico, producto dañado, unidad extraviada, etc."
             />
+            <p className={`text-xs mt-1 ${ajuste.motivo_texto.trim().length < AJUSTE_INVENTARIO.MOTIVO_MIN_LENGTH ? 'text-amber-500' : 'text-steel-400'}`}>
+              Obligatorio — mínimo {AJUSTE_INVENTARIO.MOTIVO_MIN_LENGTH} caracteres ({ajuste.motivo_texto.trim().length}/{AJUSTE_INVENTARIO.MOTIVO_MAX_LENGTH})
+            </p>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setModalAjuste(false)} className="btn-secondary">Cancelar</button>
+            <button onClick={cerrarModalAjuste} className="btn-secondary">Cancelar</button>
             <button onClick={enviarAjuste} disabled={guardando} className="btn-primary">
               {guardando ? 'Procesando...' : 'Confirmar Ajuste'}
             </button>

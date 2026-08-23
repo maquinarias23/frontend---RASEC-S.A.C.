@@ -11,7 +11,7 @@ import {
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { formatearMoneda } from '../../utils/formato';
-import { ORIGEN_INGRESO } from '../../config/constants';
+import { ORIGEN_COSTO } from '../../config/constants';
 import Paginacion from '../../components/ui/Paginacion';
 import usePaginacion from '../../hooks/usePaginacion';
 
@@ -23,7 +23,8 @@ export default function ConfiguracionPrecios() {
   const [busqueda, setBusqueda] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('');
 
-  // Precios editados: { [productoId]: { precio_venta_base, precio_vendedor, precio_catalogo, precio_mayorista } }
+  // Cambios sin guardar por producto: los cuatro precios más el costo
+  // unitario ({ costo_unitario_manual, usar_costo_manual }).
   const [preciosEditados, setPreciosEditados] = useState({});
   // Fila en edición (null = ninguna, id = fila activa)
   const [filaEditando, setFilaEditando] = useState(null);
@@ -58,19 +59,43 @@ export default function ConfiguracionPrecios() {
 
   const tieneEdiciones = Object.keys(preciosEditados).length > 0;
 
-  const obtenerPrecio = (producto, campo) => {
+  // Valor a mostrar en un input: lo editado si existe, si no lo guardado.
+  const obtenerValor = (producto, campo) => {
     if (preciosEditados[producto.id]?.[campo] !== undefined) {
       return preciosEditados[producto.id][campo];
     }
     return producto[campo] ?? '';
   };
 
-  const editarPrecio = (productoId, campo, valor) => {
+  const editarCampo = (productoId, campo, valor) => {
     setPreciosEditados((prev) => ({
       ...prev,
       [productoId]: {
         ...prev[productoId],
         [campo]: valor,
+      },
+    }));
+  };
+
+  // El costo unitario tiene dos fuentes: el calculado (última unidad ingresada,
+  // lo que devuelve el backend en costo_calculado) o el declarado a mano. Este
+  // helper resuelve cuál está activo contando los cambios sin guardar.
+  const usaCostoManual = (producto) => {
+    const editado = preciosEditados[producto.id]?.usar_costo_manual;
+    return editado !== undefined ? editado : !!producto.usar_costo_manual;
+  };
+
+  // Al pasar a manual se parte del costo calculado: el ajuste manual casi
+  // siempre es una corrección sobre lo que ya se ve, no un campo en blanco.
+  const activarCostoManual = (producto) => {
+    const valorPrevio = preciosEditados[producto.id]?.costo_unitario_manual
+      ?? producto.costo_unitario_manual;
+    setPreciosEditados((prev) => ({
+      ...prev,
+      [producto.id]: {
+        ...prev[producto.id],
+        usar_costo_manual: true,
+        costo_unitario_manual: valorPrevio ?? producto.costo_calculado ?? '',
       },
     }));
   };
@@ -94,11 +119,33 @@ export default function ConfiguracionPrecios() {
 
   const guardarTodos = async () => {
     if (!tieneEdiciones) return;
+
+    // Marcar "manual" sin importe dejaría el costo cayendo al calculado, que es
+    // justo lo que se quiso sobrescribir. El backend también lo rechaza; aquí se
+    // avisa antes de gastar el viaje.
+    const sinImporte = Object.entries(preciosEditados).find(([id, campos]) => {
+      const producto = productos.find((p) => p.id === parseInt(id));
+      if (!producto || !usaCostoManual(producto)) return false;
+      const costo = campos.costo_unitario_manual !== undefined
+        ? campos.costo_unitario_manual
+        : producto.costo_unitario_manual;
+      return costo === '' || costo === null || costo === undefined;
+    });
+    if (sinImporte) {
+      const producto = productos.find((p) => p.id === parseInt(sinImporte[0]));
+      toast.error(`${producto?.nombre || 'Un producto'}: indica el costo manual o vuelve al calculado`);
+      return;
+    }
+
     setGuardando(true);
     try {
-      const productosPayload = Object.entries(preciosEditados).map(([id, precios]) => {
+      const productosPayload = Object.entries(preciosEditados).map(([id, campos]) => {
         const payload = { id: parseInt(id) };
-        for (const [campo, valor] of Object.entries(precios)) {
+        for (const [campo, valor] of Object.entries(campos)) {
+          if (campo === 'usar_costo_manual') {
+            payload[campo] = !!valor;
+            continue;
+          }
           payload[campo] = valor === '' || valor === null ? null : parseFloat(valor);
         }
         return payload;
@@ -122,10 +169,11 @@ export default function ConfiguracionPrecios() {
   };
 
   const etiquetaOrigen = (origen) => {
-    if (origen === ORIGEN_INGRESO.IMPORTACION) return { texto: 'IMP', clase: 'bg-purple-600 text-white' };
-    if (origen === ORIGEN_INGRESO.COMPRA_LOCAL) return { texto: 'COMP', clase: 'bg-cyan-600 text-white' };
-    if (origen === ORIGEN_INGRESO.AJUSTE) return { texto: 'AJU', clase: 'bg-steel-500 text-white' };
-    if (origen === ORIGEN_INGRESO.COMPRA_EXTERNA_ENVIO) return { texto: 'EXT', clase: 'bg-orange-600 text-white' };
+    if (origen === ORIGEN_COSTO.IMPORTACION) return { texto: 'IMP', clase: 'bg-purple-600 text-white' };
+    if (origen === ORIGEN_COSTO.COMPRA_LOCAL) return { texto: 'COMP', clase: 'bg-cyan-600 text-white' };
+    if (origen === ORIGEN_COSTO.AJUSTE) return { texto: 'AJU', clase: 'bg-steel-500 text-white' };
+    if (origen === ORIGEN_COSTO.COMPRA_EXTERNA_ENVIO) return { texto: 'EXT', clase: 'bg-orange-600 text-white' };
+    if (origen === ORIGEN_COSTO.MANUAL) return { texto: 'MAN', clase: 'bg-rose-600 text-white' };
     return null;
   };
 
@@ -212,6 +260,14 @@ export default function ConfiguracionPrecios() {
             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-cyan-600 text-white">COMP</span>
             <span className="text-sm text-steel-300">Compra local</span>
           </div>
+          <div className="flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-steel-500 text-white">AJU</span>
+            <span className="text-sm text-steel-300">Ajuste de inventario</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white">MAN</span>
+            <span className="text-sm text-steel-300">Costo manual</span>
+          </div>
         </div>
       </div>
 
@@ -254,7 +310,7 @@ export default function ConfiguracionPrecios() {
                   <th className="text-left py-3 px-3 text-xs font-semibold text-steel-400 uppercase tracking-wider w-10">ID</th>
                   <th className="text-left py-3 px-3 text-xs font-semibold text-steel-400 uppercase tracking-wider">Producto</th>
                   <th className="text-left py-3 px-3 text-xs font-semibold text-steel-400 uppercase tracking-wider w-24">Categoría</th>
-                  <th className="text-right py-3 px-3 text-xs font-semibold text-orange-600 uppercase tracking-wider w-36">Costo Unit.</th>
+                  <th className="text-right py-3 px-3 text-xs font-semibold text-orange-600 uppercase tracking-wider w-44">Costo Unit.</th>
                   {campos.map((c) => (
                     <th key={c.key} className={`text-right py-3 px-3 text-xs font-semibold uppercase tracking-wider w-32 ${c.color}`}>
                       {c.label}
@@ -282,22 +338,17 @@ export default function ConfiguracionPrecios() {
                         {prod.tbl_categorias_producto?.nombre || '-'}
                       </td>
                       <td className="py-2 px-2 text-right">
-                        {prod.costo_ultimo ? (
-                          <div className="flex items-center justify-end gap-1.5">
-                            <span className="text-sm font-medium text-orange-600">
-                              {formatearMoneda(prod.costo_ultimo)}
-                            </span>
-                            {(() => {
-                              const tag = etiquetaOrigen(prod.origen_costo);
-                              return tag ? (
-                                <span className={`px-1 py-0.5 rounded text-[9px] font-bold leading-none ${tag.clase}`}>
-                                  {tag.texto}
-                                </span>
-                              ) : null;
-                            })()}
-                          </div>
+                        {editando ? (
+                          <CeldaCostoEditable
+                            producto={prod}
+                            manual={usaCostoManual(prod)}
+                            valorManual={obtenerValor(prod, 'costo_unitario_manual')}
+                            onUsarCalculado={() => editarCampo(prod.id, 'usar_costo_manual', false)}
+                            onUsarManual={() => activarCostoManual(prod)}
+                            onCambiarManual={(valor) => editarCampo(prod.id, 'costo_unitario_manual', valor)}
+                          />
                         ) : (
-                          <span className="text-steel-500 italic text-sm">—</span>
+                          <CeldaCostoLectura producto={prod} etiquetaOrigen={etiquetaOrigen} />
                         )}
                       </td>
                       {campos.map((campo) => (
@@ -308,8 +359,8 @@ export default function ConfiguracionPrecios() {
                               step="0.01"
                               min="0"
                               className="input-field text-right text-sm w-full py-1 px-2"
-                              value={obtenerPrecio(prod, campo.key)}
-                              onChange={(e) => editarPrecio(prod.id, campo.key, e.target.value)}
+                              value={obtenerValor(prod, campo.key)}
+                              onChange={(e) => editarCampo(prod.id, campo.key, e.target.value)}
                               placeholder="—"
                             />
                           ) : (
@@ -383,6 +434,91 @@ export default function ConfiguracionPrecios() {
           </button>
         </div>,
         document.body
+      )}
+    </div>
+  );
+}
+
+/**
+ * Celda "Costo Unit." fuera de edición: el costo vigente con la etiqueta de
+ * dónde sale. Cuando manda el costo manual se muestra debajo el calculado que
+ * quedó anulado, para poder comparar antes de decidir volver a él.
+ */
+function CeldaCostoLectura({ producto, etiquetaOrigen }) {
+  const costo = producto.costo_ultimo;
+  if (costo === null || costo === undefined) {
+    return <span className="text-steel-500 italic text-sm">—</span>;
+  }
+
+  const tag = etiquetaOrigen(producto.origen_costo);
+  const esManual = producto.origen_costo === ORIGEN_COSTO.MANUAL;
+  const calculado = producto.costo_calculado;
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center justify-end gap-1.5">
+        <span className="text-sm font-medium text-orange-600">{formatearMoneda(costo)}</span>
+        {tag && (
+          <span className={`px-1 py-0.5 rounded text-[9px] font-bold leading-none ${tag.clase}`}>
+            {tag.texto}
+          </span>
+        )}
+      </div>
+      {esManual && calculado !== null && calculado !== undefined && (
+        <span className="text-[10px] text-steel-500">Calculado: {formatearMoneda(calculado)}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Celda "Costo Unit." en edición: selector entre el costo calculado (última
+ * unidad ingresada) y un importe escrito a mano. El calculado nunca se pierde,
+ * así que volver a él es un clic.
+ */
+function CeldaCostoEditable({
+  producto, manual, valorManual, onUsarCalculado, onUsarManual, onCambiarManual,
+}) {
+  const calculado = producto.costo_calculado;
+  const hayCalculado = calculado !== null && calculado !== undefined;
+  const btn = 'flex-1 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors';
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex rounded-lg border border-steel-700 overflow-hidden">
+        <button
+          type="button"
+          onClick={onUsarCalculado}
+          className={`${btn} ${manual ? 'bg-steel-800 text-steel-400 hover:text-steel-200' : 'bg-orange-600 text-white'}`}
+          title="Usar el costo de la última unidad ingresada"
+        >
+          Calculado
+        </button>
+        <button
+          type="button"
+          onClick={onUsarManual}
+          className={`${btn} ${manual ? 'bg-rose-600 text-white' : 'bg-steel-800 text-steel-400 hover:text-steel-200'}`}
+          title="Escribir el costo unitario a mano"
+        >
+          Manual
+        </button>
+      </div>
+      {manual ? (
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          className="input-field text-right text-sm w-full py-1 px-2"
+          value={valorManual}
+          onChange={(e) => onCambiarManual(e.target.value)}
+          placeholder="0.00"
+        />
+      ) : (
+        <span className="text-right text-sm text-orange-600">
+          {hayCalculado
+            ? formatearMoneda(calculado)
+            : <span className="text-steel-500 italic">Sin ingresos</span>}
+        </span>
       )}
     </div>
   );

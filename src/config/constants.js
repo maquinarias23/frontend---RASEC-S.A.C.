@@ -191,6 +191,13 @@ export const CLIENTE_FORM = {
   btnVincular: 'Vincular a mi cartera',
   btnVinculando: 'Vinculando...',
   toastVinculado: 'Cliente vinculado a tu cartera.',
+  // Mismo caso detectado desde el buscador de la venta: el vendedor teclea un
+  // documento que existe pero no es de su cartera, así que no le aparece en los
+  // resultados. Se le ofrece vincularlo sin salir de la venta.
+  dniVentaTitulo: 'Este cliente ya existe, pero no está en tu cartera',
+  dniVentaVincular: (nombre) =>
+    `${nombre} ya está registrado con ese documento. Vincúlalo a tu cartera para usarlo en esta venta.`,
+  btnVincularVenta: 'Vincular y usar en esta venta',
 };
 
 // Tipos de movimiento puntos (Prisma enum: TipoMovimientoPuntos)
@@ -406,6 +413,13 @@ export const ORIGEN_INGRESO = {
   COMPRA_EXTERNA_ENVIO: 'compra_externa_envio',
 };
 
+// Origen del costo unitario mostrado en Configuración de Precios: los mismos
+// valores de ORIGEN_INGRESO más MANUAL (costo declarado a mano en el producto).
+export const ORIGEN_COSTO = {
+  ...ORIGEN_INGRESO,
+  MANUAL: 'manual',
+};
+
 // Motivo de movimiento (Prisma enum: MotivoMovimiento)
 export const MOTIVO_MOVIMIENTO = {
   IMPORTACION: 'importacion',
@@ -414,6 +428,36 @@ export const MOTIVO_MOVIMIENTO = {
   CANCELACION: 'cancelacion',
   AJUSTE: 'ajuste',
   COMPRA_EXTERNA_ENVIO: 'compra_externa_envio',
+};
+
+// Tipo de movimiento de inventario (Prisma enum: TipoMovimientoInventario)
+export const TIPO_MOVIMIENTO = {
+  INGRESO: 'ingreso',
+  SALIDA: 'salida',
+  REVERSION: 'reversion',
+};
+
+// Ajuste manual de inventario — espejo de AJUSTE_INVENTARIO del backend
+// (config/constants.js). Si cambia allá, cambia aquí: el backend rechaza el
+// ajuste con el mismo criterio, esto solo evita el viaje al servidor.
+export const AJUSTE_INVENTARIO = {
+  MOTIVO_MIN_LENGTH: 10,
+  MOTIVO_MAX_LENGTH: 500,
+  MAX_CANTIDAD: 1000,
+};
+
+// Origen declarado de un ajuste manual (Prisma enum: OrigenAjusteInventario).
+// compra_local = compra nacional, igual que en ORIGEN_INGRESO.
+export const ORIGEN_AJUSTE = {
+  IMPORTACION: 'importacion',
+  COMPRA_LOCAL: 'compra_local',
+  OTRO: 'otro',
+};
+
+export const ORIGEN_AJUSTE_LABEL = {
+  [ORIGEN_AJUSTE.IMPORTACION]: 'Importación',
+  [ORIGEN_AJUSTE.COMPRA_LOCAL]: 'Compra Nacional',
+  [ORIGEN_AJUSTE.OTRO]: 'Sin lote asociado',
 };
 
 // Tipo de proveedor (Prisma enum: TipoProveedor)

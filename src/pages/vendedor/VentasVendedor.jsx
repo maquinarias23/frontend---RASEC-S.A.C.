@@ -26,6 +26,7 @@ import Modal from '../../components/ui/Modal';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import TotalizadorVenta from '../../components/shared/TotalizadorVenta';
 import ModalEditarCliente from '../../components/shared/ModalEditarCliente';
+import ListaComprobantesVenta from '../../components/shared/ListaComprobantesVenta';
 import Paginacion from '../../components/ui/Paginacion';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
@@ -42,6 +43,7 @@ import {
   METODOS_PAGO_LABEL,
   TELEFONO_INPUT,
   DNI_RUC_INPUT,
+  CLIENTE_FORM,
   MSG_PAGO_BLOQUEADO_CLIENTE,
 } from '../../config/constants';
 import useAuthStore from '../../store/authStore';
@@ -75,6 +77,7 @@ function AutocompleteBusqueda({
   onSeleccionar,
   valorTexto = '',
   onLimpiar,
+  onTexto,
 }) {
   const [texto, setTexto] = useState(valorTexto);
   const [resultados, setResultados] = useState([]);
@@ -93,6 +96,7 @@ function AutocompleteBusqueda({
 
   const buscar = (query) => {
     setTexto(query);
+    onTexto?.(query);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (!query.trim()) { setResultados([]); setAbierto(false); return; }
     timeoutRef.current = setTimeout(async () => {
@@ -127,7 +131,7 @@ function AutocompleteBusqueda({
           <div className="absolute right-8 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-steel-600 border-t-primary-500 rounded-full animate-spin" />
         )}
         {texto && onLimpiar && (
-          <button type="button" onClick={() => { setTexto(''); setResultados([]); onLimpiar(); }}
+          <button type="button" onClick={() => { setTexto(''); setResultados([]); onTexto?.(''); onLimpiar(); }}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-steel-500 hover:text-steel-300">
             <HiOutlineX className="w-4 h-4" />
           </button>
@@ -305,6 +309,16 @@ export default function VentasVendedor() {
   const [modalCrearCliente, setModalCrearCliente] = useState(false);
   const [tarjetaCredenciales, setTarjetaCredenciales] = useState(null);
 
+  // --- Estado: cliente que existe pero no está en la cartera del vendedor ---
+  // `/clientes/buscar` filtra por cartera, así que al teclear el DNI / RUC de un
+  // cliente ajeno el buscador no devuelve nada y el vendedor acabaría creándolo
+  // duplicado. Aquí se detecta y se le ofrece vincularlo sin salir de la venta.
+  const [clienteExterno, setClienteExterno] = useState(null);
+  const [vinculandoExterno, setVinculandoExterno] = useState(false);
+  // Último documento tecleado: descarta respuestas de verificaciones que llegan
+  // tarde, cuando el vendedor ya cambió lo que estaba escribiendo.
+  const docBuscadoRef = useRef('');
+
   // Reenvío de pedido rechazado
   const [modalReenvio, setModalReenvio] = useState(false);
   const [ventaReenvio, setVentaReenvio] = useState(null);
@@ -325,10 +339,55 @@ export default function VentasVendedor() {
   // Funciones de busqueda
   // =========================================================================
 
+  // Comprueba contra TODOS los clientes (no solo la cartera) el documento que se
+  // acaba de teclear, para poder ofrecer la vinculación en el acto.
+  const verificarClienteFueraDeCartera = useCallback(async (query, encontrados) => {
+    const digits = DNI_RUC_INPUT.toDigits(query);
+    if (!DNI_RUC_INPUT.esValido(digits)) { setClienteExterno(null); return; }
+    // Si ya salió en la búsqueda es que está en la cartera: nada que vincular.
+    if (encontrados.some((c) => DNI_RUC_INPUT.toDigits(c.dni) === digits)) {
+      setClienteExterno(null);
+      return;
+    }
+    try {
+      const { data } = await api.get('/clientes/verificar-dni', { params: { dni: digits } });
+      if (docBuscadoRef.current !== digits) return;
+      setClienteExterno(data?.existe && !data.yaVinculado ? { ...data.cliente, dni: digits } : null);
+    } catch {
+      if (docBuscadoRef.current === digits) setClienteExterno(null);
+    }
+  }, []);
+
   const buscarClientes = useCallback(async (query) => {
     const { data } = await api.get('/clientes/buscar', { params: { q: query } });
-    return Array.isArray(data) ? data : (data.datos || data.data || []);
-  }, []);
+    const lista = Array.isArray(data) ? data : (data.datos || data.data || []);
+    verificarClienteFueraDeCartera(query, lista);
+    return lista;
+  }, [verificarClienteFueraDeCartera]);
+
+  // Mientras se escribe: el aviso solo sigue vigente si el texto continúa siendo
+  // el documento al que corresponde.
+  const alEscribirCliente = (texto) => {
+    const digits = DNI_RUC_INPUT.toDigits(texto);
+    docBuscadoRef.current = digits;
+    setClienteExterno((prev) => (prev && prev.dni === digits ? prev : null));
+  };
+
+  // Trae el cliente a la cartera del vendedor y lo deja seleccionado en la venta.
+  const vincularClienteExterno = async () => {
+    if (!clienteExterno || vinculandoExterno) return;
+    setVinculandoExterno(true);
+    try {
+      const { data } = await api.post(`/clientes/${clienteExterno.id}/vincular`);
+      toast.success(data?.mensaje || CLIENTE_FORM.toastVinculado);
+      setClienteExterno(null);
+      await seleccionarCliente(data?.cliente || { id: clienteExterno.id, nombre: clienteExterno.nombre });
+    } catch (err) {
+      toast.error(err.response?.data?.error || CLIENTE_FORM.errorGenerico);
+    } finally {
+      setVinculandoExterno(false);
+    }
+  };
 
   const buscarProductos = useCallback(async (query) => {
     const { data } = await api.get('/productos');
@@ -358,6 +417,8 @@ export default function VentasVendedor() {
 
   const abrirNuevaVenta = async () => {
     setClienteSeleccionado(null);
+    setClienteExterno(null);
+    docBuscadoRef.current = '';
     setClientePuntos(0);
     setItems([]);
     setTipoEntrega(TIPO_ENTREGA.ENVIO_POR_AGENCIA);
@@ -455,12 +516,16 @@ export default function VentasVendedor() {
 
   const seleccionarCliente = async (cliente) => {
     setClienteSeleccionado(cliente);
+    setClienteExterno(null);
     // La agenda es por cliente: al cambiar de cliente se descarta el receptor
     // elegido para no arrastrar a alguien que pertenece a otra cartera.
     setReceptor(RECEPTOR_VACIO);
     setContactoSeleccionado('');
     try {
       const { data } = await api.get(`/clientes/${cliente.id}`);
+      // Al venir de una vinculación solo se conoce id + nombre: el detalle
+      // completa DNI y teléfono para la tarjeta del cliente.
+      setClienteSeleccionado((prev) => (prev?.id === cliente.id ? { ...cliente, ...data } : prev));
       setClientePuntos(data.saldo_puntos || 0);
     } catch {
       setClientePuntos(0);
@@ -1067,7 +1132,8 @@ export default function VentasVendedor() {
               placeholder="Buscar por nombre, DNI o telefono..."
               valorTexto={clienteSeleccionado?.nombre || ''}
               onSeleccionar={seleccionarCliente}
-              onLimpiar={() => { setClienteSeleccionado(null); setClientePuntos(0); }}
+              onTexto={alEscribirCliente}
+              onLimpiar={() => { setClienteSeleccionado(null); setClientePuntos(0); setClienteExterno(null); }}
               renderItem={(c) => (
                 <div>
                   <span className="font-medium">{c.nombre}</span>
@@ -1079,6 +1145,25 @@ export default function VentasVendedor() {
             <button type="button" onClick={() => setModalCrearCliente(true)} className="text-xs text-primary-600 hover:text-primary-800 mt-1">
               + Crear nuevo cliente
             </button>
+
+            {/* El documento tecleado pertenece a un cliente que existe pero no
+                es de esta cartera: se vincula aquí mismo, sin ir a crearlo. */}
+            {clienteExterno && (
+              <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+                <p className="text-sm font-medium text-steel-100">{CLIENTE_FORM.dniVentaTitulo}</p>
+                <p className="mt-1 text-xs text-steel-300">
+                  {CLIENTE_FORM.dniVentaVincular(clienteExterno.nombre)}
+                </p>
+                <button
+                  type="button"
+                  onClick={vincularClienteExterno}
+                  disabled={vinculandoExterno}
+                  className="btn-primary mt-3 text-sm py-1.5"
+                >
+                  {vinculandoExterno ? CLIENTE_FORM.btnVinculando : CLIENTE_FORM.btnVincularVenta}
+                </button>
+              </div>
+            )}
             {clienteSeleccionado && (
               <div className="mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
                 <div className="flex items-center justify-between">
@@ -2229,6 +2314,10 @@ export default function VentasVendedor() {
                 )}
               </div>
             )}
+
+            {/* Comprobantes electrónicos (solo lectura: el vendedor no los emite,
+                pero debe poder verlos e imprimirlos para su venta) */}
+            <ListaComprobantesVenta ventaId={ventaDetalle.id} soloLectura />
 
             {/* Contraseña de Envío (envío por agencia) */}
             {ventaDetalle.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && (

@@ -6,10 +6,18 @@ import ModalEmitirNota from './ModalEmitirNota';
 import ModalWhatsappComprobante from './ModalWhatsappComprobante';
 import IconoWhatsapp from '../ui/IconoWhatsapp';
 import { TIPO_COMPROBANTE_LABEL, ESTADO_COMPROBANTE, COMPROBANTE_NUMERO, WA_COMPROBANTE } from '../../config/constants';
-import { HiOutlineDocumentText, HiOutlinePlusCircle, HiOutlineRefresh, HiOutlineXCircle, HiOutlineDocumentDownload } from 'react-icons/hi';
+import { HiOutlineDocumentText, HiOutlinePlusCircle, HiOutlineRefresh, HiOutlineXCircle, HiOutlineDocumentDownload, HiOutlinePrinter } from 'react-icons/hi';
+import { abrirPdf, imprimirPdf } from '../../utils/imprimirPdf';
 import toast from 'react-hot-toast';
 
-export default function ListaComprobantesVenta({ ventaId, venta }) {
+/**
+ * Comprobantes electrónicos de una venta.
+ *
+ * @param {boolean} [soloLectura] - Modo consulta: sin emitir, anular, notas de
+ *   crédito ni WhatsApp; solo ver e imprimir. Es el modo del VENDEDOR, que no
+ *   genera comprobantes pero necesita los de sus ventas.
+ */
+export default function ListaComprobantesVenta({ ventaId, venta, soloLectura = false }) {
   const [comprobantes, setComprobantes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalEmitir, setModalEmitir] = useState(false);
@@ -60,13 +68,26 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
     }
   };
 
-  const handleDescargarPdf = async (comp) => {
+  // Se usa el pdf_url que ya trajo la lista (el backend validó el acceso al
+  // listar) y no se antepone ningún await: window.open fuera del gesto del
+  // clic lo bloquea el navegador como pop-up.
+  const handleVerPdf = (comp) => {
+    if (!abrirPdf(comp.pdf_url)) {
+      toast.error('El navegador bloqueó la ventana. Permite las ventanas emergentes de este sitio.');
+    }
+  };
+
+  const handleImprimirPdf = async (comp) => {
+    const toastId = toast.loading('Preparando impresión...');
     try {
-      const { data } = await comprobantesService.descargarPdf(comp.id);
-      if (data.pdf_url) window.open(data.pdf_url, '_blank');
-      else toast.error('PDF no disponible');
-    } catch {
-      toast.error('Error al descargar PDF');
+      const via = await imprimirPdf(comp.pdf_url);
+      if (via === 'pestana') {
+        toast.success('PDF abierto en otra pestaña: usa Ctrl+P para imprimir', { id: toastId });
+      } else {
+        toast.dismiss(toastId);
+      }
+    } catch (err) {
+      toast.error(err.message || 'No se pudo imprimir el comprobante', { id: toastId });
     }
   };
 
@@ -81,10 +102,12 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
           </div>
           <h3 className="text-sm font-semibold text-steel-200 tracking-wide">Comprobantes Electrónicos</h3>
         </div>
-        <button onClick={() => setModalEmitir(true)}
-          className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
-          <HiOutlinePlusCircle className="w-4 h-4" /> Emitir
-        </button>
+        {!soloLectura && (
+          <button onClick={() => setModalEmitir(true)}
+            className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5">
+            <HiOutlinePlusCircle className="w-4 h-4" /> Emitir
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -94,7 +117,11 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
       ) : comprobantes.length === 0 ? (
         <div className="text-center py-5 bg-steel-900/30 rounded-xl border border-steel-700/30">
           <HiOutlineDocumentText className="w-7 h-7 text-steel-500 mx-auto mb-1.5" />
-          <p className="text-steel-400 text-xs">Sin comprobantes emitidos</p>
+          <p className="text-steel-400 text-xs">
+            {soloLectura
+              ? 'Aún no se ha emitido ningún comprobante para esta venta'
+              : 'Sin comprobantes emitidos'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -111,31 +138,38 @@ export default function ListaComprobantesVenta({ ventaId, venta }) {
                 <span className="text-xs text-steel-300 font-semibold num-chromium">S/ {parseFloat(comp.total).toFixed(2)}</span>
               </div>
               <div className="flex items-center gap-1.5 opacity-70 group-hover:opacity-100 transition-opacity">
-                {comp.pdf_url && (
-                  <button onClick={() => handleDescargarPdf(comp)} className={iconBtn} title="Descargar PDF">
-                    <HiOutlineDocumentDownload className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {!comp.anulado && comp.estado !== ESTADO_COMPROBANTE.ERROR && (
+                {comp.pdf_url ? (
+                  <>
+                    <button onClick={() => handleVerPdf(comp)} className={iconBtn} title="Ver PDF">
+                      <HiOutlineDocumentDownload className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => handleImprimirPdf(comp)} className={iconBtn} title="Imprimir">
+                      <HiOutlinePrinter className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                ) : soloLectura ? (
+                  <span className="text-[10px] text-steel-500">PDF en proceso</span>
+                ) : null}
+                {!soloLectura && !comp.anulado && comp.estado !== ESTADO_COMPROBANTE.ERROR && (
                   <button onClick={() => setModalWhatsapp(comp)}
                     className="p-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all"
                     title={WA_COMPROBANTE.btnAccion}>
                     <IconoWhatsapp className="w-3.5 h-3.5" />
                   </button>
                 )}
-                {comp.proveedor_external_id && !comp.anulado && (
+                {!soloLectura && comp.proveedor_external_id && !comp.anulado && (
                   <button onClick={() => handleConsultar(comp)} className={iconBtn} title="Consultar SUNAT">
                     <HiOutlineRefresh className="w-3.5 h-3.5" />
                   </button>
                 )}
-                {comp.estado === ESTADO_COMPROBANTE.ERROR && (
+                {!soloLectura && comp.estado === ESTADO_COMPROBANTE.ERROR && (
                   <button onClick={() => handleReintentar(comp)}
                     className="p-1.5 rounded-lg border border-accent-500/30 bg-accent-500/10 text-accent-500 hover:bg-accent-500/20 transition-all"
                     title="Reintentar">
                     <HiOutlineRefresh className="w-3.5 h-3.5" />
                   </button>
                 )}
-                {!comp.anulado && comp.proveedor_external_id && (
+                {!soloLectura && !comp.anulado && comp.proveedor_external_id && (
                   <>
                     <button onClick={() => setModalNota(comp)}
                       className="px-2 py-1 rounded-lg border border-steel-700/40 bg-steel-900/30 text-steel-300 hover:text-steel-100 hover:bg-steel-800 transition-all text-[10px] font-bold tracking-wider"

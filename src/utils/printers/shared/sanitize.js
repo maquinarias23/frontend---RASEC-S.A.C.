@@ -26,14 +26,14 @@ export function sanitizarRotuloVenta(data) {
     codigo: data.codigo || '-',
     codigoBarcode: sanitizarBarcode(data.codigo || ''),
     ventaId: data.ventaId ?? '-',
-    // Datos legales de la empresa: encabezan el rótulo. Solo la razón social
-    // tiene respaldo; RUC y dirección se omiten si no están configurados.
+    // Datos legales de la empresa: encabezan el rótulo y son el REMITENTE
+    // (quien envía). Salen de la configuración de facturación. Solo la razón
+    // social tiene respaldo; RUC, dirección y teléfono se omiten si no están
+    // configurados. El conductor del rótulo NO se imprime.
     empresaRazon: data.empresa?.razon_social || 'MAQUINARIA RASEC S.A.C.',
     empresaRuc: data.empresa?.ruc || '',
     empresaDireccion: data.empresa?.direccion || '',
-    remNombre: data.remitente_nombre || '-',
-    remDni: data.remitente_dni || '-',
-    remTel: TELEFONO_INPUT.format(data.remitente_telefono) || '-',
+    empresaTelefono: TELEFONO_INPUT.format(data.empresa?.telefono) || '',
     destNombre: data.destinatario_nombre || '-',
     destDni: destDni || '-',
     destTel: TELEFONO_INPUT.format(data.destinatario_telefono) || '-',

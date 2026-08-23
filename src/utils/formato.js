@@ -53,3 +53,15 @@ export function formatearFechaHoraPrecisa(fecha) {
     timeZone: 'America/Lima',
   }).format(new Date(fecha));
 }
+
+// Solo la hora (zona Lima). Se usa cuando fecha y hora van en columnas
+// separadas, como en el historial de ajustes de inventario.
+export function formatearHora(fecha) {
+  if (!fecha) return '-';
+  return new Intl.DateTimeFormat('es-PE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZone: 'America/Lima',
+  }).format(new Date(fecha));
+}

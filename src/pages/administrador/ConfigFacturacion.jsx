@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { configFacturacionService } from '../../services/comprobantesService';
-import { TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV, COMPROBANTE_NUMERO } from '../../config/constants';
+import { TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV, COMPROBANTE_NUMERO, TELEFONO_INPUT } from '../../config/constants';
 import toast from 'react-hot-toast';
 import {
   HiOutlineKey, HiOutlinePlusCircle, HiOutlineCheck, HiOutlineX,
@@ -18,6 +18,7 @@ const FORM_INICIAL = {
   ruc_emisor: '',
   razon_social_emisor: '',
   direccion_emisor: '',
+  telefono_emisor: '',
   formato_pdf: FORMATO_PDF.A4,
   moneda_defecto: MONEDA.PEN,
   igv_tipo_defecto: TIPO_IGV.GRAVADO,
@@ -45,6 +46,7 @@ export default function ConfigFacturacion() {
         ruc_emisor: configRes.data.ruc_emisor || '',
         razon_social_emisor: configRes.data.razon_social_emisor || '',
         direccion_emisor: configRes.data.direccion_emisor || '',
+        telefono_emisor: TELEFONO_INPUT.format(configRes.data.telefono_emisor),
         formato_pdf: configRes.data.formato_pdf || FORMATO_PDF.A4,
         moneda_defecto: configRes.data.moneda_defecto || MONEDA.PEN,
         igv_tipo_defecto: configRes.data.igv_tipo_defecto || TIPO_IGV.GRAVADO,
@@ -57,6 +59,12 @@ export default function ConfigFacturacion() {
   useEffect(() => { cargar(); }, []);
 
   const handleGuardar = async () => {
+    // El teléfono es opcional, pero si se carga debe estar completo: el rótulo
+    // de despacho lo imprime como contacto del remitente.
+    if (form.telefono_emisor && !TELEFONO_INPUT.esValido(form.telefono_emisor)) {
+      toast.error(TELEFONO_INPUT.MSG_INVALIDO);
+      return;
+    }
     setSaving(true);
     try {
       await configFacturacionService.actualizar(form);
@@ -227,7 +235,7 @@ export default function ConfigFacturacion() {
             </div>
             <div>
               <h2 className="font-display text-xl tracking-wider text-steel-100">DATOS DEL EMISOR</h2>
-              <p className="text-xs text-steel-400">Información de la empresa que aparecerá en los comprobantes</p>
+              <p className="text-xs text-steel-400">Información de la empresa que aparecerá en los comprobantes y como remitente en los rótulos</p>
             </div>
           </div>
 
@@ -246,6 +254,15 @@ export default function ConfigFacturacion() {
               <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Dirección Fiscal</label>
               <input type="text" className="input-field" value={form.direccion_emisor}
                 onChange={e => setForm(prev => ({ ...prev, direccion_emisor: e.target.value }))} placeholder="Dirección registrada en SUNAT" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Teléfono de Contacto</label>
+              <input type="text" className="input-field font-mono tracking-wider"
+                inputMode={TELEFONO_INPUT.INPUT_MODE} pattern={TELEFONO_INPUT.PATTERN}
+                maxLength={TELEFONO_INPUT.MAX_LENGTH} value={form.telefono_emisor}
+                onChange={e => setForm(prev => ({ ...prev, telefono_emisor: TELEFONO_INPUT.format(e.target.value) }))}
+                placeholder={TELEFONO_INPUT.PLACEHOLDER} />
+              <p className="text-[10px] text-steel-400">Se imprime como remitente en los rótulos de despacho.</p>
             </div>
           </div>
         </div>

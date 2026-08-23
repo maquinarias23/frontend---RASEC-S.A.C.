@@ -27,13 +27,12 @@ function dibujarLayoutCompleto(ctx, d, widthDots, margenX) {
     for (const ln of lineas) { ctx.fillText(ln, margenX, y); y += alto; }
   };
 
+  // Membrete: solo la razón social. RUC/dirección/teléfono no se repiten aquí
+  // porque el bloque REMITENTE de más abajo ya los imprime.
   ctx.font = 'bold 30px sans-serif';
   const tituloW = ctx.measureText(d.empresaRazon).width;
   ctx.fillText(d.empresaRazon, (widthDots - tituloW) / 2, y);
   y += 36;
-  ctx.font = '16px sans-serif';
-  if (d.empresaRuc) escribir(`RUC: ${d.empresaRuc}`, 20);
-  if (d.empresaDireccion) escribir(d.empresaDireccion, 20);
   linea(2);
 
   ctx.font = '18px sans-serif';
@@ -42,11 +41,13 @@ function dibujarLayoutCompleto(ctx, d, widthDots, margenX) {
   escribir(d.codigo, 32);
   linea(2);
 
+  // Remitente = la empresa (configuración de facturación), no el conductor.
   ctx.font = 'bold 20px sans-serif'; escribir('REMITENTE', 24);
   ctx.font = '18px sans-serif';
-  escribir(`Nombre: ${d.remNombre}`, 22);
-  escribir(`DNI:    ${d.remDni}`, 22);
-  escribir(`Tel:    ${d.remTel}`, 22);
+  escribir(`Razon:  ${d.empresaRazon}`, 22);
+  if (d.empresaRuc) escribir(`RUC:    ${d.empresaRuc}`, 22);
+  if (d.empresaDireccion) escribir(`Dir:    ${d.empresaDireccion}`, 22);
+  if (d.empresaTelefono) escribir(`Tel:    ${d.empresaTelefono}`, 22);
   linea(1);
 
   ctx.font = 'bold 20px sans-serif'; escribir('DESTINATARIO', 24);

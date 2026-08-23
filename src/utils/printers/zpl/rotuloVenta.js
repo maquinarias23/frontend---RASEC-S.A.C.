@@ -68,16 +68,10 @@ function generarCompleto(formato, d) {
   b.raw(header(formato));
 
   let y = 10;
+  // Membrete: solo la razón social. RUC/dirección/teléfono no se repiten aquí
+  // porque el bloque REMITENTE de más abajo ya los imprime.
   b.field(m, y, fT, d.empresaRazon, { fbWidth: usable, fbLines: 2, fbAlign: 'C' });
   y += fT * 2 + 6;
-  if (d.empresaRuc) {
-    b.field(m, y, fP, `RUC: ${d.empresaRuc}`, { fbWidth: usable, fbLines: 1, fbAlign: 'C' });
-    y += fP + 2;
-  }
-  if (d.empresaDireccion) {
-    b.field(m, y, fP, d.empresaDireccion, { fbWidth: usable, fbLines: 2, fbAlign: 'C' });
-    y += fP * 2 + 2;
-  }
   b.graphicLine(m, y, usable, 3); y += 12;
 
   b.field(m, y, fP, 'Codigo de Venta'); y += fP + 4;
@@ -85,10 +79,19 @@ function generarCompleto(formato, d) {
   y += fN * 2 + 6;
   b.graphicLine(m, y, usable, 2); y += 10;
 
+  // Remitente = la empresa (configuración de facturación), no el conductor.
   b.field(m, y, fN, 'REMITENTE'); y += fN + 4;
-  b.field(m, y, fP, `Nombre: ${d.remNombre}`, { fbWidth: usable, fbLines: 2 }); y += fP * 2 + 2;
-  b.field(m, y, fP, `DNI: ${d.remDni}`); y += fP + 2;
-  b.field(m, y, fP, `Tel: ${d.remTel}`); y += fP + 6;
+  b.field(m, y, fP, `Razon: ${d.empresaRazon}`, { fbWidth: usable, fbLines: 2 }); y += fP * 2 + 2;
+  if (d.empresaRuc) {
+    b.field(m, y, fP, `RUC: ${d.empresaRuc}`); y += fP + 2;
+  }
+  if (d.empresaDireccion) {
+    b.field(m, y, fP, `Dir: ${d.empresaDireccion}`, { fbWidth: usable, fbLines: 2 }); y += fP * 2 + 2;
+  }
+  if (d.empresaTelefono) {
+    b.field(m, y, fP, `Tel: ${d.empresaTelefono}`); y += fP + 2;
+  }
+  y += 4;
   b.graphicLine(m, y, usable, 1); y += 8;
 
   b.field(m, y, fN, 'DESTINATARIO'); y += fN + 4;
