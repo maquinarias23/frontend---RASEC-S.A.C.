@@ -3,7 +3,7 @@ import {
   HiOutlinePlus, HiOutlineUserGroup, HiOutlineClock, HiOutlineCash,
   HiOutlineGift, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineChevronDown,
   HiOutlineSave, HiOutlineRefresh, HiOutlineChartBar, HiOutlineTrash, HiOutlineDownload,
-  HiOutlineInformationCircle,
+  HiOutlineInformationCircle, HiOutlineAdjustments,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import api from '../../api/axios';
@@ -11,6 +11,7 @@ import toast from 'react-hot-toast';
 import TablaGenerica from '../../components/ui/TablaGenerica';
 import Modal from '../../components/ui/Modal';
 import Tabs from '../../components/ui/Tabs';
+import ConstructorComisiones from '../../components/rrhh/ConstructorComisiones';
 import { formatearFecha, formatearFechaHora, formatearMoneda, formatearFechaHoraPrecisa } from '../../utils/formato';
 import { ESTADO_ASISTENCIA, MESES } from '../../config/constants';
 
@@ -19,6 +20,7 @@ const TABS_RRHH = [
   { key: 'asistencia', label: 'Asistencia', icono: <HiOutlineClock className="w-4 h-4 inline" /> },
   { key: 'tardanzas', label: 'Tardanzas / Bonos', icono: <HiOutlineGift className="w-4 h-4 inline" /> },
   { key: 'comisiones', label: 'Comisiones', icono: <HiOutlineCash className="w-4 h-4 inline" /> },
+  { key: 'constructor', label: 'Constructor de Comisiones', icono: <HiOutlineAdjustments className="w-4 h-4 inline" /> },
   { key: 'ranking', label: 'Ranking', icono: <HiOutlineChartBar className="w-4 h-4 inline" /> },
 ];
 
@@ -932,6 +934,8 @@ export default function RRHH() {
       {/* ================================================================= */}
       {/* RANKING TAB                                                       */}
       {/* ================================================================= */}
+      {tab === 'constructor' && <ConstructorComisiones />}
+
       {tab === 'ranking' && (
         <div className="space-y-4">
           {/* Configuracion de pesos */}

@@ -15,6 +15,7 @@ import {
   HiOutlineStar,
   HiOutlineClock,
   HiOutlineGift,
+  HiOutlineDocumentDownload,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -26,6 +27,7 @@ import Paginacion from '../../components/ui/Paginacion';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
 import ModalEditarCliente from '../../components/shared/ModalEditarCliente';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
+import { exportarCotizacion } from '../../utils/exportarCotizacion';
 import {
   ESTADO_PROSPECTO,
   ESTADO_UNIDAD,
@@ -36,6 +38,8 @@ import {
   ORIGEN_PROSPECTO,
   TELEFONO_INPUT,
   DNI_RUC_INPUT,
+  ORIGEN_COTIZACION,
+  COTIZACION_EXPORT,
 } from '../../config/constants';
 import useAuthStore from '../../store/authStore';
 import { ROLES } from '../../config/roles';
@@ -249,8 +253,21 @@ const columnas = [
 export default function Prospectos() {
   const { datos, cargando, listar } = useCrud('/prospectos');
   const location = useLocation();
-  const { esRol } = useAuthStore();
+  const { esRol, usuario } = useAuthStore();
   const puedeUsarMayorista = esRol(ROLES.ADMINISTRADOR, ROLES.SUPER_ADMINISTRADOR);
+  const [exportandoCotizacion, setExportandoCotizacion] = useState(false);
+
+  // Exporta la cotizacion del prospecto como documento A4 (Guardar como PDF).
+  const exportarCotizacionProspecto = async (prospecto) => {
+    setExportandoCotizacion(true);
+    try {
+      await exportarCotizacion({ ...prospecto, _origen: ORIGEN_COTIZACION.PROSPECTO }, { usuario });
+    } catch (err) {
+      toast.error(err.message || COTIZACION_EXPORT.MSG_ERROR);
+    } finally {
+      setExportandoCotizacion(false);
+    }
+  };
   const [filtroEstado, setFiltroEstado] = useState('');
   const [busqueda, setBusqueda] = useState('');
 
@@ -1296,7 +1313,22 @@ export default function Prospectos() {
             {/* Cotización */}
             {prospectoDetalle.items_cotizacion?.length > 0 && (
               <div>
-                <h3 className="text-sm font-semibold text-steel-300 mb-2">Cotización</h3>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-steel-300">Cotización</h3>
+                  <button
+                    onClick={() => exportarCotizacionProspecto(prospectoDetalle)}
+                    disabled={exportandoCotizacion}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                    title={COTIZACION_EXPORT.BTN_EXPORTAR}
+                  >
+                    {exportandoCotizacion ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <HiOutlineDocumentDownload className="w-3.5 h-3.5" />
+                    )}
+                    {COTIZACION_EXPORT.BTN_EXPORTAR}
+                  </button>
+                </div>
                 <div className="bg-steel-800/50 rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>

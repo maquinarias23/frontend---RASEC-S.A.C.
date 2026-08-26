@@ -852,12 +852,23 @@ export default function Despacho() {
 
   const generarRotulo = async () => {
     if (!ventaParaRotulo) return;
+    // El conductor es obligatorio: sin él la entrega no le figura a ningún
+    // chofer una vez que el almacén registra la salida.
+    if (conductorExterno) {
+      if (!externoCompleto(datosExterno)) {
+        toast.error('Complete nombre, DNI y teléfono del conductor externo');
+        return;
+      }
+    } else if (!choferSeleccionado) {
+      toast.error('Debe seleccionar un conductor');
+      return;
+    }
     // La cobertura puede estar incompleta: el chofer completa en viaje.
     const id = ventaParaRotulo.id;
     try {
       const payload = conductorExterno
         ? { chofer_externo: { nombre: datosExterno.nombre.trim(), dni: datosExterno.dni.trim(), telefono: datosExterno.telefono.trim() } }
-        : { chofer_user_id: choferSeleccionado || undefined };
+        : { chofer_user_id: choferSeleccionado };
       const { data } = await api.post(`/almacen/${id}/rotulo`, payload);
 
       setRotuloData(rotuloDesdeRespuesta(data, id).rotulo);
@@ -1661,6 +1672,17 @@ export default function Despacho() {
                   )}
                 </div>
               </>
+            )}
+
+            {/* La venta ya salió del almacén: el conductor sigue siendo
+                 corregible hasta que el paquete quede en agencia. Es la vía
+                 para reasignar una entrega que le figura al chofer equivocado
+                 (o a ninguno) después de registrada la salida. */}
+            {ventaParaRotulo?.estado_tracking === ESTADO_TRACKING.EN_RUTA_A_AGENCIA && (
+              <p className="text-[11px] text-amber-700 bg-amber-100 border border-amber-300 rounded px-2 py-1 mt-2">
+                Esta venta ya salió del almacén. Al cambiar el conductor, la entrega deja de figurarle
+                al anterior y pasa a la bandeja del nuevo.
+              </p>
             )}
           </div>
 

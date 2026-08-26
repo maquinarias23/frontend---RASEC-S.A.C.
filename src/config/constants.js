@@ -1065,3 +1065,44 @@ export const LS_PROTOCOLO_OVERRIDE_KEY = 'rasec_protocolo_override';
 // SVG path del ícono de WhatsApp (evita repetir inline SVG)
 export const WHATSAPP_SVG_PATH = 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z';
 
+
+
+// ---------------------------------------------------------------------------
+// Identidad de la empresa para documentos exportables (cotización en PDF).
+// El RUC, la razón social, la dirección y el teléfono NO viven aquí: se leen de
+// Administrador → Facturación (tbl_configuracion_facturacion), que es donde ya
+// se registran para los comprobantes electrónicos.
+// ---------------------------------------------------------------------------
+export const EMPRESA = {
+  RAZON_SOCIAL: 'MAQUINARIAS RASEC S.A.C.',
+  MARCA_LINEA_1: 'MAQUINARIAS',
+  MARCA_LINEA_2: 'RASEC S.A.C.',
+  RUBRO: 'Venta de maquinaria, repuestos y herramientas industriales',
+  HORARIO: 'Lun a Sáb: 8:00 - 18:00',
+  LOGO_URL: '/logo-rasec.png',
+};
+
+// Textos y reglas del documento de cotización exportable
+export const COTIZACION_EXPORT = {
+  TITULO_DOC: 'COTIZACIÓN',
+  // Días de vigencia de la oferta, se imprime como "Válida hasta".
+  DIAS_VALIDEZ: 7,
+  MONEDA_NOMBRE: 'SOLES',
+  MONEDA_ETIQUETA: 'SOLES (S/)',
+  ETIQUETA_OBSEQUIO: 'OBSEQUIO',
+  CONDICIONES: [
+    'Precios expresados en Soles (S/) e incluyen IGV.',
+    'La disponibilidad de stock se confirma al momento de la aceptación.',
+    'Los plazos de entrega se coordinan al confirmar el pedido.',
+    'Envíos a nivel nacional por agencia de transporte a solicitud del cliente.',
+    'Los productos cuentan con garantía comercial contra defectos de fábrica.',
+  ],
+  NOTA_LEGAL: 'Documento generado electrónicamente. No constituye comprobante de pago.',
+  BTN_EXPORTAR: 'Exportar PDF',
+  BTN_IMPRIMIR: 'Imprimir / Guardar PDF',
+  MSG_GENERANDO: 'Generando cotización…',
+  MSG_POPUP_BLOQUEADO:
+    'El navegador bloqueó la ventana de la cotización. Permite las ventanas emergentes de este sitio e inténtalo de nuevo.',
+  MSG_ERROR: 'No se pudo generar la cotización',
+  MSG_SIN_ITEMS: 'La cotización no tiene productos para exportar',
+};

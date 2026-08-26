@@ -61,17 +61,32 @@ const columnas = [
       </div>
     );
   }},
+  // El conductor del rótulo es lo que determina en la bandeja de qué chofer
+  // aparece la entrega. Se muestra con nombre —no solo "Chofer interno"— para
+  // que almacén detecte una asignación equivocada sin abrir el rótulo.
   { key: 'conductor', label: 'Conductor', render: (f) => {
     const rotulo = (f.rotulos || []).slice().sort((a, b) => b.id - a.id)[0];
-    if (!rotulo) return <span className="text-xs text-steel-500">-</span>;
+    if (!rotulo) return <span className="text-xs text-red-500 font-medium">Sin rótulo</span>;
     if (rotulo.chofer_externo_nombre) return (
       <div>
         <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">Externo</span>
         <span className="block text-xs text-steel-400 mt-0.5">{rotulo.chofer_externo_nombre}</span>
       </div>
     );
-    if (rotulo.chofer_user_id) return <span className="text-xs text-steel-400">Chofer interno</span>;
-    return <span className="text-xs text-steel-500">-</span>;
+    if (rotulo.chofer_user_id) return (
+      <div>
+        <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-medium">Interno</span>
+        <span className="block text-xs text-steel-400 mt-0.5">
+          {rotulo.tbl_chofer?.nombres || `Usuario #${rotulo.chofer_user_id}`}
+        </span>
+      </div>
+    );
+    return (
+      <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium"
+        title="Esta entrega no le figura a ningún chofer. Asigne el conductor desde Despacho › Rótulo.">
+        Sin conductor
+      </span>
+    );
   }},
   { key: 'estado_tracking', label: 'Tracking', render: (f) => <EstadoBadge estado={f.estado_tracking} /> },
   { key: 'fecha', label: 'Fecha', render: (f) => formatearFechaHora(f.fecha_hora_registro) },

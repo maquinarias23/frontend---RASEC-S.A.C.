@@ -16,8 +16,9 @@ import {
   HiOutlinePencil,
   HiOutlineUserGroup,
   HiOutlineExternalLink,
+  HiOutlineDocumentDownload,
 } from 'react-icons/hi';
-import { ESTADO_COTIZACION, ORIGEN_COTIZACION, TIPO_ENTREGA, TIPO_DESTINO, TELEFONO_INPUT } from '../../config/constants';
+import { ESTADO_COTIZACION, ORIGEN_COTIZACION, TIPO_ENTREGA, TIPO_DESTINO, TELEFONO_INPUT, COTIZACION_EXPORT } from '../../config/constants';
 import { obtenerDepartamentos, obtenerProvincias, obtenerDistritos } from '../../services/ubigeoService';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -27,6 +28,8 @@ import Paginacion from '../../components/ui/Paginacion';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import { abrirWhatsapp } from '../../utils/whatsapp';
+import { exportarCotizacion } from '../../utils/exportarCotizacion';
+import useAuthStore from '../../store/authStore';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -215,6 +218,7 @@ const columnas = [
 export default function Cotizaciones() {
   const navigate = useNavigate();
   const { datos, cargando, listar } = useCrud('/cotizaciones-web');
+  const usuario = useAuthStore((s) => s.usuario);
 
   const irAlProspecto = (prospectoId) => {
     navigate('/vendedor/prospectos', { state: { prospectoId } });
@@ -258,6 +262,9 @@ export default function Cotizaciones() {
 
   // --- WhatsApp cargando ---
   const [enviandoWhatsapp, setEnviandoWhatsapp] = useState(null);
+
+  // --- Exportacion a PDF cargando ---
+  const [exportandoId, setExportandoId] = useState(null);
 
   // =========================================================================
   // Calculos del modal de conversion (basados en items editados)
@@ -355,6 +362,21 @@ export default function Cotizaciones() {
   const verDetalle = (cotizacion) => {
     setCotizacionDetalle(cotizacion);
     setModalDetalle(true);
+  };
+
+  // =========================================================================
+  // Exportar cotizacion (documento A4 imprimible / PDF)
+  // =========================================================================
+
+  const exportar = async (cotizacion) => {
+    setExportandoId(cotizacion._uid || cotizacion.id);
+    try {
+      await exportarCotizacion(cotizacion, { usuario });
+    } catch (err) {
+      toast.error(err.message || COTIZACION_EXPORT.MSG_ERROR);
+    } finally {
+      setExportandoId(null);
+    }
   };
 
   // =========================================================================
@@ -730,6 +752,20 @@ export default function Cotizaciones() {
                   <HiOutlineEye className="w-3.5 h-3.5" />
                 </button>
 
+                {/* Exportar cotizacion en PDF (siempre disponible) */}
+                <button
+                  onClick={() => exportar(fila)}
+                  disabled={exportandoId === (fila._uid || fila.id)}
+                  className="text-xs bg-steel-800 text-steel-200 px-2 py-1 rounded hover:bg-steel-700 flex items-center gap-1 disabled:opacity-50"
+                  title={COTIZACION_EXPORT.BTN_EXPORTAR}
+                >
+                  {exportandoId === (fila._uid || fila.id) ? (
+                    <div className="w-3.5 h-3.5 border-2 border-steel-400 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <HiOutlineDocumentDownload className="w-3.5 h-3.5" />
+                  )}
+                </button>
+
                 {/* Si es de origen Prospecto: redirigir al módulo Prospectos */}
                 {esProspecto && (
                   <button
@@ -866,8 +902,22 @@ export default function Cotizaciones() {
             </div>
 
             {/* Botones de accion dentro del detalle */}
-            {cotizacionDetalle._origen === ORIGEN_COTIZACION.PROSPECTO ? (
-              <div className="flex justify-end gap-3 pt-3 border-t border-steel-700">
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-3 border-t border-steel-700">
+              {/* Exportar: disponible para cualquier origen y estado */}
+              <button
+                onClick={() => exportar(cotizacionDetalle)}
+                disabled={exportandoId === (cotizacionDetalle._uid || cotizacionDetalle.id)}
+                className="sm:mr-auto flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 disabled:opacity-50 transition-colors"
+              >
+                {exportandoId === (cotizacionDetalle._uid || cotizacionDetalle.id) ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <HiOutlineDocumentDownload className="w-4 h-4" />
+                )}
+                {COTIZACION_EXPORT.BTN_EXPORTAR}
+              </button>
+
+              {cotizacionDetalle._origen === ORIGEN_COTIZACION.PROSPECTO ? (
                 <button
                   onClick={() => {
                     setModalDetalle(false);
@@ -878,35 +928,35 @@ export default function Cotizaciones() {
                   <HiOutlineExternalLink className="w-4 h-4" />
                   Gestionar en Prospectos
                 </button>
-              </div>
-            ) : (
-              cotizacionDetalle.estado === ESTADO_COTIZACION.PENDIENTE_WHATSAPP && (
-                <div className="flex justify-end gap-3 pt-3 border-t border-steel-700">
-                  <button
-                    onClick={() => enviarWhatsapp(cotizacionDetalle)}
-                    disabled={enviandoWhatsapp === cotizacionDetalle.id}
-                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-                  >
-                    {enviandoWhatsapp === cotizacionDetalle.id ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <HiOutlineChat className="w-4 h-4" />
-                    )}
-                    Enviar WhatsApp
-                  </button>
-                  <button
-                    onClick={() => {
-                      setModalDetalle(false);
-                      abrirModalConvertir(cotizacionDetalle);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                  >
-                    <HiOutlineSwitchHorizontal className="w-4 h-4" />
-                    Convertir a Venta
-                  </button>
-                </div>
-              )
-            )}
+              ) : (
+                cotizacionDetalle.estado === ESTADO_COTIZACION.PENDIENTE_WHATSAPP && (
+                  <>
+                    <button
+                      onClick={() => enviarWhatsapp(cotizacionDetalle)}
+                      disabled={enviandoWhatsapp === cotizacionDetalle.id}
+                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                    >
+                      {enviandoWhatsapp === cotizacionDetalle.id ? (
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <HiOutlineChat className="w-4 h-4" />
+                      )}
+                      Enviar WhatsApp
+                    </button>
+                    <button
+                      onClick={() => {
+                        setModalDetalle(false);
+                        abrirModalConvertir(cotizacionDetalle);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                    >
+                      <HiOutlineSwitchHorizontal className="w-4 h-4" />
+                      Convertir a Venta
+                    </button>
+                  </>
+                )
+              )}
+            </div>
           </div>
         )}
       </Modal>

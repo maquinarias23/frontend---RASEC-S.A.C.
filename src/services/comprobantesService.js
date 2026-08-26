@@ -14,6 +14,9 @@ export const comprobantesService = {
 
 export const configFacturacionService = {
   obtener: () => api.get('/config-facturacion'),
+  // Solo los datos del emisor que se imprimen (sin token del proveedor):
+  // accesible para cualquier usuario que exporte una cotizacion.
+  obtenerEmisor: () => api.get('/config-facturacion/emisor'),
   actualizar: (body) => api.put('/config-facturacion', body),
   crearSerie: (body) => api.post('/config-facturacion/series', body),
   listarSeries: (params = {}) => api.get('/config-facturacion/series', { params }),

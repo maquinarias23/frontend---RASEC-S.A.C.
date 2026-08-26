@@ -7,6 +7,7 @@ import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { formatearFecha, formatearMoneda } from '../../utils/formato';
 import { MESES } from '../../config/constants';
+import MiSemanaV5 from '../../components/rrhh/MiSemanaV5';
 
 export default function ComisionesVendedor() {
   const hoy = new Date();
@@ -78,6 +79,12 @@ export default function ComisionesVendedor() {
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'actual' ? 'bg-primary-600 text-white' : 'bg-steel-800 text-steel-400 hover:text-steel-200'}`}
         >
           Periodo Actual
+        </button>
+        <button
+          onClick={() => setTab('semana')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${tab === 'semana' ? 'bg-primary-600 text-white' : 'bg-steel-800 text-steel-400 hover:text-steel-200'}`}
+        >
+          Mi Semana (V5)
         </button>
         <button
           onClick={() => setTab('historial')}
@@ -253,6 +260,8 @@ export default function ComisionesVendedor() {
           </div>
         </div>
       )}
+
+      {tab === 'semana' && <MiSemanaV5 />}
 
       {tab === 'historial' && (
         <div className="card">
