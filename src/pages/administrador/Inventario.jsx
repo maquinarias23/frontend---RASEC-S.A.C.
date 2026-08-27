@@ -3,6 +3,7 @@ import {
   HiOutlineSearch, HiOutlineAdjustments, HiOutlineClipboardList,
   HiOutlineTruck, HiOutlineShoppingCart, HiOutlineOfficeBuilding,
   HiOutlineChevronDown, HiOutlineChevronUp, HiOutlineDocumentSearch,
+  HiOutlineDownload,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import TablaGenerica from '../../components/ui/TablaGenerica';
@@ -170,6 +171,90 @@ export default function Inventario() {
     }
   };
 
+  // Exporta exactamente lo que el usuario está viendo: se parte de
+  // datosFiltrados, así que los filtros de búsqueda, categoría y almacén ya
+  // vienen aplicados (con los totales recalculados si hay almacén elegido).
+  const exportarInventarioExcel = () => {
+    if (!datosFiltrados.length) return;
+    import('xlsx').then(XLSX => {
+      const almacenSel = almacenFiltro
+        ? almacenesActivos.find(a => a.id === parseInt(almacenFiltro))
+        : null;
+
+      const filasStock = datosFiltrados.map(p => ({
+        Producto: p.nombre,
+        Categoria: p.categoria || '',
+        'Precio Mínimo': Number(p.precio_venta_base) || 0,
+        'Stock Total': Number(p.stock_total) || 0,
+        Disponibles: Number(p.disponibles) || 0,
+        Reservadas: Number(p.asignadas) || 0,
+        'En Pedido': Number(p.en_proceso) || 0,
+        'Entregado en agencia': Number(p.entregadas) || 0,
+        'Retiradas por ajuste': Number(p.canceladas) || 0,
+      }));
+
+      // Fila de totales al pie para cuadrar contra el conteo físico.
+      const sumar = (campo) => filasStock.reduce((acc, f) => acc + f[campo], 0);
+      filasStock.push({
+        Producto: `TOTALES (${filasStock.length} productos)`,
+        Categoria: '',
+        'Precio Mínimo': '',
+        'Stock Total': sumar('Stock Total'),
+        Disponibles: sumar('Disponibles'),
+        Reservadas: sumar('Reservadas'),
+        'En Pedido': sumar('En Pedido'),
+        'Entregado en agencia': sumar('Entregado en agencia'),
+        'Retiradas por ajuste': sumar('Retiradas por ajuste'),
+      });
+
+      const wb = XLSX.utils.book_new();
+      const wsStock = XLSX.utils.json_to_sheet(filasStock);
+      wsStock['!cols'] = [
+        { wch: 45 }, { wch: 18 }, { wch: 14 }, { wch: 11 }, { wch: 12 },
+        { wch: 11 }, { wch: 11 }, { wch: 20 }, { wch: 20 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsStock, 'Stock');
+
+      // Segunda hoja con el desglose por almacén: una fila por producto y
+      // almacén con existencias, para el conteo en sitio.
+      const filasDesglose = [];
+      for (const p of datosFiltrados) {
+        const desglose = (p.desglose_almacenes || []).filter(d =>
+          d.stock_total > 0 && (!almacenFiltro || d.almacen_id === parseInt(almacenFiltro))
+        );
+        for (const d of desglose) {
+          filasDesglose.push({
+            Producto: p.nombre,
+            Categoria: p.categoria || '',
+            Almacen: d.almacen_nombre || 'Sin asignar',
+            'Stock Total': Number(d.stock_total) || 0,
+            Disponibles: Number(d.disponibles) || 0,
+            Reservadas: Number(d.asignadas) || 0,
+            'En Pedido': Number(d.en_proceso) || 0,
+            'Entregado en agencia': Number(d.entregadas) || 0,
+            'Retiradas por ajuste': Number(d.canceladas) || 0,
+          });
+        }
+      }
+      if (filasDesglose.length) {
+        const wsDesglose = XLSX.utils.json_to_sheet(filasDesglose);
+        wsDesglose['!cols'] = [
+          { wch: 45 }, { wch: 18 }, { wch: 22 }, { wch: 11 }, { wch: 12 },
+          { wch: 11 }, { wch: 11 }, { wch: 20 }, { wch: 20 },
+        ];
+        XLSX.utils.book_append_sheet(wb, wsDesglose, 'Por Almacén');
+      }
+
+      const fecha = new Date().toISOString().slice(0, 10);
+      const sufijo = [categoriaFiltro, almacenSel?.nombre]
+        .filter(Boolean)
+        .map(s => s.replace(/[^\w\sáéíóúñÁÉÍÓÚÑ-]/g, '').trim().replace(/\s+/g, '_'))
+        .join('_');
+      XLSX.writeFile(wb, `Inventario_${sufijo ? `${sufijo}_` : ''}${fecha}.xlsx`);
+      toast.success('Inventario exportado');
+    }).catch(() => toast.error('No se pudo generar el Excel'));
+  };
+
   const enviarAjuste = async () => {
     if (!ajuste.product_id || !ajuste.cantidad || parseInt(ajuste.cantidad) <= 0) {
       return toast.error('Selecciona producto y cantidad valida');
@@ -229,10 +314,21 @@ export default function Inventario() {
     <div>
       <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
         <h1 className="text-2xl font-bold font-display tracking-wider text-steel-100">Inventario</h1>
-        {tabActual === 'stock' && puedeAjustar && (
-          <button onClick={() => setModalAjuste(true)} className="btn-primary flex items-center gap-2">
-            <HiOutlineAdjustments className="w-4 h-4" /> Ajustar Inventario
-          </button>
+        {tabActual === 'stock' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportarInventarioExcel}
+              disabled={cargando || !datosFiltrados.length}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              <HiOutlineDownload className="w-4 h-4" /> Exportar Excel
+            </button>
+            {puedeAjustar && (
+              <button onClick={() => setModalAjuste(true)} className="btn-primary flex items-center gap-2">
+                <HiOutlineAdjustments className="w-4 h-4" /> Ajustar Inventario
+              </button>
+            )}
+          </div>
         )}
       </div>
 
