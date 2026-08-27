@@ -73,7 +73,7 @@ const esquemaVacio = () => ({
   requiere_pago_completo: false, monto_adelanto_minimo: 0, porcentaje_adelanto_minimo: 0,
   origen_venta_bruta: 'total', revierte_si_cancela: true,
   rampup_modo: 'excluido', rampup_semanas: 2, rampup_reemplaza_escala: true,
-  rampup_tramos: [], condiciones: [], componentes: [],
+  rampup_tramos: [], rampup_bono_tramos: [], condiciones: [], componentes: [],
 });
 
 // ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ export default function ConstructorComisiones() {
   const [guardando, setGuardando] = useState(false);
   const [avanzado, setAvanzado] = useState(false);
 
-  const [sim, setSim] = useState({ venta_bruta: 8501, num_operaciones: 6, utilidad: '', es_nuevo: false });
+  const [sim, setSim] = useState({ venta_bruta: 8501, num_operaciones: 6, utilidad: '', es_nuevo: false, semana_vendedor: 1 });
   const [resultado, setResultado] = useState(null);
   const [simulando, setSimulando] = useState(false);
 
@@ -177,6 +177,41 @@ export default function ConstructorComisiones() {
     }]);
   };
 
+  // ---- Bono de productividad del vendedor nuevo ----
+  // Se guarda como lista plana de escalones con su semana; agregar una semana
+  // es agregar su primer escalón.
+  const setBono = (i, campo, valor) => {
+    const a = [...(esquema.rampup_bono_tramos || [])];
+    a[i] = { ...a[i], [campo]: valor };
+    set('rampup_bono_tramos', a);
+  };
+
+  const agregarEscalonBono = (semana) => set('rampup_bono_tramos', [
+    ...(esquema.rampup_bono_tramos || []),
+    {
+      semana_numero: semana, metrica_x: 'num_operaciones',
+      desde_x: 0, hasta_x: '', tipo_valor: 'monto', valor: 0, etiqueta: '',
+    },
+  ]);
+
+  const agregarSemanaBono = () => {
+    // La primera semana del arranque que aún no tenga tabla propia.
+    const usadas = new Set((esquema.rampup_bono_tramos || []).map((t) => Number(t.semana_numero)));
+    let semana = 1;
+    while (usadas.has(semana)) semana++;
+    agregarEscalonBono(semana);
+  };
+
+  const quitarEscalonBono = (i) => set(
+    'rampup_bono_tramos',
+    (esquema.rampup_bono_tramos || []).filter((_, x) => x !== i)
+  );
+
+  const quitarSemanaBono = (semana) => set(
+    'rampup_bono_tramos',
+    (esquema.rampup_bono_tramos || []).filter((t) => Number(t.semana_numero) !== semana)
+  );
+
   const guardar = async (activar = false) => {
     setGuardando(true);
     try {
@@ -213,14 +248,17 @@ export default function ConstructorComisiones() {
       const hoy = new Date();
       const lunes = new Date(hoy);
       lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
+      // Para probar el arranque se simula un vendedor que ingresó N-1 semanas
+      // antes de este lunes: así el motor lo ubica en la semana elegida y se
+      // puede verificar la tabla de bono de cada semana por separado.
+      const ingreso = new Date(lunes);
+      ingreso.setDate(lunes.getDate() - ((parseInt(sim.semana_vendedor) || 1) - 1) * 7);
       const { data } = await api.post('/rrhh/comisiones/simular', {
         esquema_id: esquema?.id,
         venta_bruta: sim.venta_bruta,
         utilidad: sim.utilidad === '' ? null : sim.utilidad,
         num_operaciones: sim.num_operaciones,
-        // Para probar el arranque basta marcar la casilla: se simula un
-        // vendedor que ingresó esta misma semana.
-        fecha_ingreso_vendedor: sim.es_nuevo ? lunes.toISOString().slice(0, 10) : null,
+        fecha_ingreso_vendedor: sim.es_nuevo ? ingreso.toISOString().slice(0, 10) : null,
         fecha_inicio_periodo: sim.es_nuevo ? lunes.toISOString().slice(0, 10) : null,
       });
       setResultado(data);
@@ -238,6 +276,20 @@ export default function ConstructorComisiones() {
 
   const vacia = esquema.componentes.length === 0 && esquema.condiciones.length === 0;
   const modoRamp = MODOS_RAMPUP.find((m) => m.value === esquema.rampup_modo);
+  const semanasArranque = parseInt(esquema.rampup_semanas) || 0;
+
+  // Los escalones del bono de arranque viajan en una lista plana; la pantalla
+  // los agrupa por semana, que es como se configuran y como se leen. Se
+  // arrastra el índice original (_i) para poder editar la fila correcta.
+  const escalonesBono = (esquema.rampup_bono_tramos || []).map((t, i) => ({ ...t, _i: i }));
+  const semanasBono = [...new Set(escalonesBono.map((t) => Number(t.semana_numero) || 1))].sort((a, b) => a - b);
+
+  // En modo manual RRHH confirma un único monto por todo el paquete, así que
+  // el desglose que se muestra es la sugerencia, no lo que se paga.
+  const rp = resultado?.rampup;
+  const rampManual = rp?.modo === 'manual';
+  const rampMontoPct = rampManual ? (rp?.monto_porcentaje_sugerido ?? 0) : (rp?.monto_porcentaje ?? 0);
+  const rampMontoBono = rampManual ? (rp?.bono?.monto_sugerido ?? 0) : (rp?.monto_bono ?? 0);
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -381,6 +433,22 @@ export default function ConstructorComisiones() {
               Es un vendedor recién ingresado
             </label>
 
+            {/* Cada semana del arranque tiene su propia tabla de bono, así que
+                hay que poder probarlas una por una. */}
+            {sim.es_nuevo && (
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-sm text-steel-200">¿En qué semana va?</span>
+                <select className="input-field !py-1 !text-sm max-w-[130px]" value={sim.semana_vendedor}
+                  onChange={(e) => setSim({ ...sim, semana_vendedor: e.target.value })}>
+                  {Array.from({ length: Math.max(semanasArranque, 1) + 1 }, (_, k) => k + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n > semanasArranque ? `Semana ${n} (ya no es nuevo)` : `Semana ${n}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             <button onClick={calcular} disabled={simulando || !esquema.id}
               className="btn-primary w-full !py-2 !text-sm mt-1">
               {simulando ? 'Calculando…' : 'Calcular'}
@@ -427,14 +495,44 @@ export default function ConstructorComisiones() {
                       </tr>
                     ))}
 
-                    {resultado.rampup?.aplica && (
+                    {/* El paquete de arranque se muestra desglosado: el % que
+                        se le reconoce y el bono de productividad de su semana. */}
+                    {rp?.aplica && rp.porcentaje > 0 && (
                       <tr>
-                        <td>Arranque de vendedor nuevo</td>
+                        <td className={rampMontoPct === 0 ? 'text-steel-400' : ''}>Arranque de vendedor nuevo</td>
                         <td className="text-xs text-steel-400">
-                          Semana {resultado.semana_del_vendedor} · {resultado.rampup.porcentaje}% de {formatearMoneda(resultado.rampup.base_aplicada)}
-                          {!resultado.rampup.confirmado && <span className="block text-accent-600">falta que RRHH lo confirme</span>}
+                          Semana {resultado.semana_del_vendedor} · {rp.porcentaje}% de {formatearMoneda(rp.base_aplicada)}
                         </td>
-                        <td className="cifra font-medium">{formatearMoneda(resultado.rampup.monto)}</td>
+                        <td className={`cifra ${rampMontoPct === 0 ? 'text-steel-400' : 'font-medium'}`}>
+                          {formatearMoneda(rampMontoPct)}
+                        </td>
+                      </tr>
+                    )}
+
+                    {rp?.bono?.aplica && (
+                      <tr>
+                        <td className={rampMontoBono === 0 ? 'text-steel-400' : ''}>Bono de productividad (vendedor nuevo)</td>
+                        <td className="text-xs text-steel-400">
+                          Semana {resultado.semana_del_vendedor} · {rp.bono.tramo_etiqueta
+                            || `${rp.bono.valor_alcanzado} ops: no llega al mínimo de la semana`}
+                        </td>
+                        <td className={`cifra ${rampMontoBono === 0 ? 'text-steel-400' : 'font-medium'}`}>
+                          {formatearMoneda(rampMontoBono)}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* En modo manual lo de arriba es la sugerencia: lo que se
+                        paga es el monto único que confirma RRHH. */}
+                    {rp?.aplica && rampManual && (
+                      <tr>
+                        <td className={rp.monto === 0 ? 'text-steel-400' : ''}>Arranque confirmado por RRHH</td>
+                        <td className="text-xs text-steel-400">
+                          {rp.confirmado
+                            ? `Reemplaza el paquete sugerido de ${formatearMoneda(rp.monto_sugerido)}`
+                            : <span className="text-accent-600">Falta que RRHH lo confirme · sugerido {formatearMoneda(rp.monto_sugerido)}</span>}
+                        </td>
+                        <td className="cifra font-medium">{formatearMoneda(rp.monto)}</td>
                       </tr>
                     )}
                   </tbody>
@@ -655,6 +753,121 @@ export default function ConstructorComisiones() {
                     ))}
                   </tbody>
                 </table>
+              )}
+            </div>
+          )}
+
+          {/* Bono de productividad del arranque: una tabla de escalones por
+              semana, porque al vendedor nuevo se le pide menos al principio. */}
+          {esquema.rampup_modo !== 'excluido' && (
+            <div className="pt-3 mt-1 border-t border-steel-700/40">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0">
+                  <span className="font-condensed uppercase tracking-[0.12em] text-[11px] text-steel-400">
+                    Bono de productividad del vendedor nuevo
+                  </span>
+                  <p className="hoja-nota">
+                    El mismo bono de siempre, pero con su propia tabla de operaciones en cada semana del arranque.
+                  </p>
+                </div>
+                {editando && (
+                  <button onClick={agregarSemanaBono} className="btn-ghost !py-0.5 !text-xs flex items-center gap-1 shrink-0">
+                    <HiOutlinePlus className="w-3.5 h-3.5" /> Agregar semana
+                  </button>
+                )}
+              </div>
+
+              {semanasBono.length === 0 ? (
+                <p className="hoja-nota italic">
+                  Sin configurar: durante el arranque el vendedor nuevo no cobra bono de productividad.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {semanasBono.map((sem) => {
+                    const filas = escalonesBono.filter((t) => (Number(t.semana_numero) || 1) === sem);
+                    const fueraDeArranque = semanasArranque > 0 && sem > semanasArranque;
+                    return (
+                      <div key={sem} className="rounded-lg border border-steel-700/50 overflow-hidden">
+                        <div className="flex items-center justify-between gap-3 px-3 py-1.5 bg-steel-700/20">
+                          <span className="text-xs font-medium text-steel-200">
+                            Semana {sem} del vendedor
+                            {fueraDeArranque && (
+                              <span className="text-accent-600 ml-2 font-normal">
+                                &middot; el arranque dura {semanasArranque} semana(s): esta nunca se pagaría
+                              </span>
+                            )}
+                          </span>
+                          {editando && (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button onClick={() => agregarEscalonBono(sem)} className="btn-ghost !py-0.5 !text-xs flex items-center gap-1">
+                                <HiOutlinePlus className="w-3.5 h-3.5" /> Agregar escalón
+                              </button>
+                              <button onClick={() => quitarSemanaBono(sem)} className="text-primary-500 hover:text-primary-600">
+                                <HiOutlineTrash className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="hoja">
+                            <thead>
+                              <tr>
+                                <th className="!w-9" />
+                                <th>Si cierra</th>
+                                <th className="!text-right">Paga</th>
+                                <th>Nombre</th>
+                                {editando && <th className="!w-10" />}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filas.map((t, j) => (
+                                <tr key={t._i}>
+                                  <td className="fila-num">{j + 1}</td>
+                                  <td>
+                                    {editando ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-steel-400 text-xs">de</span>
+                                        <input type="number" min="0" className="celda-entrada max-w-[80px]" value={t.desde_x}
+                                          onChange={(e) => setBono(t._i, 'desde_x', e.target.value)} />
+                                        <span className="text-steel-400 text-xs">a</span>
+                                        <input type="number" min="0" className="celda-entrada max-w-[80px]" placeholder="sin tope"
+                                          value={t.hasta_x ?? ''} onChange={(e) => setBono(t._i, 'hasta_x', e.target.value)} />
+                                        <span className="text-steel-400 text-xs">operaciones</span>
+                                      </div>
+                                    ) : describirRango(t.desde_x, t.hasta_x, 'num_operaciones')}
+                                  </td>
+                                  <td className="cifra font-semibold">
+                                    {editando ? (
+                                      <input type="number" step="0.01" className="celda-entrada max-w-[90px] ml-auto" value={t.valor}
+                                        onChange={(e) => setBono(t._i, 'valor', e.target.value)} />
+                                    ) : formatearMoneda(t.valor)}
+                                  </td>
+                                  <td className="text-steel-400 text-xs">
+                                    {editando ? (
+                                      <input className="input-field !py-1 !text-xs w-28" placeholder="2 ops"
+                                        value={t.etiqueta || ''} onChange={(e) => setBono(t._i, 'etiqueta', e.target.value)} />
+                                    ) : (t.etiqueta || '—')}
+                                  </td>
+                                  {editando && (
+                                    <td className="text-center">
+                                      <button onClick={() => quitarEscalonBono(t._i)} className="text-primary-500 hover:text-primary-600">
+                                        <HiOutlineTrash className="w-4 h-4" />
+                                      </button>
+                                    </td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="hoja-nota">
+                    Desde la semana {semanasArranque + 1} el vendedor deja de ser nuevo y pasa al bono de productividad regular.
+                  </p>
+                </div>
               )}
             </div>
           )}

@@ -191,17 +191,50 @@ export default function MiSemanaV5() {
                     </tr>
                   ))}
 
-                  {detalle.rampup?.aplica && (
+                  {/* El arranque se desglosa en sus dos partes: el porcentaje
+                      reconocido y el bono de productividad de esa semana. En
+                      modo manual ambas son la sugerencia y lo que se paga es el
+                      monto único que confirma RRHH. */}
+                  {detalle.rampup?.aplica && detalle.rampup.porcentaje > 0 && (
+                    <tr className="border-b border-steel-800 bg-blue-500/5">
+                      <td className="py-2 text-steel-200">Comisión Ramp-Up</td>
+                      <td className="py-2 text-steel-400 text-xs">
+                        Semana {detalle.semana_del_vendedor} · {detalle.rampup.porcentaje}% de{' '}
+                        {formatearMoneda(detalle.rampup.base_aplicada)}
+                      </td>
+                      <td className="py-2 text-right text-steel-100">
+                        {formatearMoneda(detalle.rampup.modo === 'manual'
+                          ? detalle.rampup.monto_porcentaje_sugerido
+                          : detalle.rampup.monto_porcentaje)}
+                      </td>
+                    </tr>
+                  )}
+
+                  {detalle.rampup?.bono?.aplica && (
+                    <tr className="border-b border-steel-800 bg-blue-500/5">
+                      <td className="py-2 text-steel-200">Bono de Productividad (arranque)</td>
+                      <td className="py-2 text-steel-400 text-xs">
+                        Semana {detalle.semana_del_vendedor} · {detalle.rampup.bono.tramo_etiqueta
+                          || `${detalle.rampup.bono.valor_alcanzado} ops: no llegaste al mínimo de la semana`}
+                      </td>
+                      <td className="py-2 text-right text-steel-100">
+                        {formatearMoneda(detalle.rampup.modo === 'manual'
+                          ? detalle.rampup.bono.monto_sugerido
+                          : detalle.rampup.monto_bono)}
+                      </td>
+                    </tr>
+                  )}
+
+                  {detalle.rampup?.aplica && detalle.rampup.modo === 'manual' && (
                     <tr className="border-b border-steel-800 bg-blue-500/5">
                       <td className="py-2 text-steel-200">
-                        Comisión Ramp-Up
+                        Ramp-Up confirmado
                         {!detalle.rampup.confirmado && (
                           <span className="block text-xs text-amber-600">Pendiente de confirmación por RRHH</span>
                         )}
                       </td>
                       <td className="py-2 text-steel-400 text-xs">
-                        Semana {detalle.semana_del_vendedor} · {detalle.rampup.porcentaje}% de{' '}
-                        {formatearMoneda(detalle.rampup.base_aplicada)}
+                        Reemplaza lo sugerido arriba ({formatearMoneda(detalle.rampup.monto_sugerido)})
                       </td>
                       <td className="py-2 text-right text-steel-100">{formatearMoneda(detalle.rampup.monto)}</td>
                     </tr>

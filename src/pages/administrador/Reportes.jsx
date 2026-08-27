@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   HiOutlineChartBar,
   HiOutlineCash,
@@ -18,7 +19,8 @@ import GraficaBarras from '../../components/ui/GraficaBarras';
 import DateRangePicker from '../../components/ui/DateRangePicker';
 import Tabs from '../../components/ui/Tabs';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
-import { formatearMoneda, formatearFecha } from '../../utils/formato';
+import BotonesExportar from '../../components/ui/BotonesExportar';
+import { formatearMoneda, formatearFecha, formatearNumero } from '../../utils/formato';
 
 /* ───────────── TABS ───────────── */
 const TABS = [
@@ -132,6 +134,91 @@ const colSinRotacion = [
   { key: 'nombre', label: 'Producto' },
 ];
 
+/* ───────────── COLUMNAS DE EXPORTACION ─────────────
+   Las tablas de pantalla usan `render` (JSX); Excel necesita el valor crudo
+   para poder sumar y filtrar. Por eso la exportacion declara sus columnas
+   aparte: `valor` devuelve el dato en bruto y `formato` solo se aplica al PDF.
+   `tipo` decide la alineacion y el formato numerico del .xlsx.            */
+const num = (valor) => Number(valor || 0);
+
+const COL_INDICE = { header: '#', valor: (_f, i) => i + 1, tipo: 'numero', sinTotal: true, ancho: 6 };
+const colMonto = (header, campo = 'monto_total') => ({
+  header, valor: (f) => num(f[campo]), tipo: 'moneda', formato: formatearMoneda, ancho: 16,
+});
+const colCantidad = (header, campo) => ({
+  header, valor: (f) => num(f[campo]), tipo: 'numero', formato: formatearNumero, ancho: 15,
+});
+
+const expProductos = [
+  COL_INDICE,
+  { header: 'Producto', valor: 'nombre', ancho: 45 },
+  colCantidad('Cant. Vendida', 'total_vendido'),
+  colMonto('Monto Total'),
+];
+
+const expRotacion = [
+  COL_INDICE,
+  { header: 'Producto', valor: 'nombre', ancho: 45 },
+  colCantidad('Frecuencia de Venta', 'total_vendido'),
+  colMonto('Monto Total'),
+];
+
+const expVendedores = [
+  COL_INDICE,
+  { header: 'Vendedor', valor: 'nombres', ancho: 32 },
+  colCantidad('N. Ventas', 'total_ventas'),
+  colMonto('Monto Total'),
+];
+
+const expClientes = [
+  COL_INDICE,
+  { header: 'Cliente', valor: 'nombre', ancho: 32 },
+  { header: 'DNI', valor: 'dni', ancho: 14 },
+  colCantidad('N. Compras', 'numero_compras'),
+  colMonto('Monto Total'),
+];
+
+const expDistritos = [
+  COL_INDICE,
+  { header: 'Distrito', valor: (f) => f.distrito || 'Sin distrito', ancho: 28 },
+  colCantidad('Cant. Ventas', 'cantidad_ventas'),
+  colMonto('Monto Total'),
+];
+
+const expUtilidad = [
+  COL_INDICE,
+  { header: 'Producto', valor: 'nombre', ancho: 45 },
+  colMonto('Utilidad', 'utilidad'),
+  colCantidad('Unidades Vendidas', 'unidades_vendidas'),
+];
+
+const expSinRotacion = [
+  COL_INDICE,
+  { header: 'ID Producto', valor: (f) => f.id, tipo: 'numero', sinTotal: true, ancho: 12 },
+  { header: 'Producto', valor: 'nombre', ancho: 45 },
+];
+
+const expVentasDia = [
+  { header: 'Dia del Mes', valor: (f) => `Dia ${f.dia_mes}`, ancho: 14 },
+  colCantidad('Cant. Ventas', 'cantidad'),
+  colMonto('Monto', 'monto'),
+];
+
+const expHorasPico = [
+  { header: 'Hora', valor: (f) => `${String(f.hora).padStart(2, '0')}:00`, ancho: 10 },
+  colCantidad('Cant. Ventas', 'cantidad'),
+];
+
+const expDiasPico = [
+  { header: 'Fecha', valor: (f) => formatearFecha(f.dia), ancho: 14 },
+  colCantidad('Cant. Ventas', 'cantidad'),
+];
+
+const expIndicadores = [
+  { header: 'Indicador', valor: 'indicador', ancho: 28 },
+  { header: 'Valor', valor: 'valor', ancho: 18 },
+];
+
 /* ───────────── FILTROS INICIALES ───────────── */
 const filtrosIniciales = {
   fechaInicio: '',
@@ -151,6 +238,9 @@ export default function Reportes() {
   const [tab, setTab] = useState('resumen');
   const [filtros, setFiltros] = useState({ ...filtrosIniciales });
   const [cargando, setCargando] = useState(false);
+  const navegar = useNavigate();
+  const { pathname } = useLocation();
+  const refContenido = useRef(null);
 
   /* ---------- Datos de API ---------- */
   const [dashboard, setDashboard] = useState({});
@@ -263,6 +353,151 @@ export default function Reportes() {
   // Rotacion = productos ordenados por total_vendido (frecuencia)
   const productosRotacion = [...productosMasVendidos].sort(
     (a, b) => Number(b.total_vendido || 0) - Number(a.total_vendido || 0)
+  );
+
+  // Mismo orden que muestran las graficas de Horas/Dias Pico.
+  const horasPicoOrdenadas = [...horasPico].sort((a, b) => Number(a.hora) - Number(b.hora));
+  const diasPicoOrdenados = [...diasPico].sort(
+    (a, b) => Number(b.cantidad || 0) - Number(a.cantidad || 0)
+  );
+
+  /* ---------- Navegacion desde las tarjetas ---------- */
+  /* Cada tarjeta lleva al reporte que la explica. Las de la izquierda del menu
+     (Ventas Pendientes) salen del modulo: el prefijo se toma de la ruta actual
+     porque esta misma pantalla la usan administrador, secretaria y supervision,
+     y cada rol tiene su propio listado de ventas. */
+  const irATab = (destino) => {
+    setTab(destino);
+    refContenido.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const irAVentas = () => {
+    const prefijo = pathname.split('/')[1] || 'administrador';
+    navegar(`/${prefijo}/ventas`);
+  };
+
+  /* ---------- Filtros aplicados, para el encabezado de los documentos ---------- */
+  const nombreVendedor = listaVendedores.find(
+    (v) => String(v.id) === String(filtros.vendedor_user_id)
+  );
+  const nombreProducto = listaProductos.find(
+    (p) => String(p.id) === String(filtros.product_id)
+  );
+  const etiquetaDestino = {
+    [TIPO_DESTINO.LIMA]: 'Lima',
+    [TIPO_DESTINO.PROVINCIA]: 'Provincia',
+  }[filtros.tipo_destino];
+
+  const filtrosAplicados = [
+    { etiqueta: 'Desde', valor: filtros.fechaInicio ? formatearFecha(filtros.fechaInicio) : '' },
+    { etiqueta: 'Hasta', valor: filtros.fechaFin ? formatearFecha(filtros.fechaFin) : '' },
+    { etiqueta: 'Vendedor', valor: nombreVendedor?.nombres || nombreVendedor?.nombre || '' },
+    { etiqueta: 'Producto', valor: nombreProducto?.nombre || '' },
+    { etiqueta: 'Distrito', valor: filtros.distrito },
+    { etiqueta: 'Destino', valor: etiquetaDestino || '' },
+    { etiqueta: 'Con promocion', valor: filtros.con_promocion ? (filtros.con_promocion === 'si' ? 'Si' : 'No') : '' },
+    { etiqueta: 'Con puntos', valor: filtros.con_puntos ? (filtros.con_puntos === 'si' ? 'Si' : 'No') : '' },
+  ].filter((f) => f.valor);
+
+  /* ---------- Reporte exportable del tab activo ---------- */
+  const REPORTES_EXPORTABLES = {
+    resumen: {
+      archivo: 'Reporte_Resumen',
+      titulo: 'Resumen General',
+      secciones: [
+        {
+          titulo: 'Indicadores',
+          columnas: expIndicadores,
+          filas: [
+            { indicador: 'Ventas del mes', valor: formatearNumero(dashboard.ventas_mes || 0) },
+            { indicador: 'Monto del mes', valor: formatearMoneda(dashboard.monto_mes || 0) },
+            { indicador: 'Total clientes', valor: formatearNumero(dashboard.total_clientes || 0) },
+            { indicador: 'Total productos', valor: formatearNumero(dashboard.total_productos || 0) },
+            { indicador: 'Ventas pendientes', valor: formatearNumero(dashboard.ventas_pendientes || 0) },
+            { indicador: 'Productos vendidos', valor: formatearNumero(productosMasVendidos.length) },
+            { indicador: 'Vendedores activos', valor: formatearNumero(rankingVendedores.length) },
+            { indicador: 'Clientes frecuentes', valor: formatearNumero(clientesFrecuentes.length) },
+            { indicador: 'Productos sin rotacion', valor: formatearNumero(productosSinRotacion.length) },
+          ],
+        },
+        {
+          titulo: 'Top 5 Distritos',
+          columnas: expDistritos,
+          filas: distritos.slice(0, 5),
+          totales: true,
+        },
+      ],
+    },
+    productos: {
+      archivo: 'Reporte_Productos',
+      titulo: 'Productos Mas Vendidos',
+      secciones: [
+        { titulo: 'Productos Mas Vendidos', columnas: expProductos, filas: productosMasVendidos, totales: true },
+      ],
+    },
+    rotacion: {
+      archivo: 'Reporte_Rotacion',
+      titulo: 'Rotacion de Productos',
+      secciones: [
+        { titulo: 'Rotacion por Frecuencia de Venta', columnas: expRotacion, filas: productosRotacion, totales: true },
+      ],
+    },
+    vendedores: {
+      archivo: 'Reporte_Vendedores',
+      titulo: 'Ranking de Vendedores',
+      secciones: [
+        { titulo: 'Ranking de Vendedores', columnas: expVendedores, filas: rankingVendedores, totales: true },
+      ],
+    },
+    clientes: {
+      archivo: 'Reporte_Clientes',
+      titulo: 'Clientes Mas Frecuentes',
+      secciones: [
+        { titulo: 'Clientes Mas Frecuentes', columnas: expClientes, filas: clientesFrecuentes, totales: true },
+      ],
+    },
+    'ventas-dia': {
+      archivo: 'Reporte_Ventas_Por_Dia',
+      titulo: 'Ventas por Dia del Mes',
+      secciones: [
+        { titulo: 'Ventas por Dia del Mes', columnas: expVentasDia, filas: ventasPorDia, totales: true },
+      ],
+    },
+    'horas-dias': {
+      archivo: 'Reporte_Horas_Dias_Pico',
+      titulo: 'Horas y Dias Pico',
+      secciones: [
+        { titulo: 'Horas Pico', columnas: expHorasPico, filas: horasPicoOrdenadas, totales: true },
+        { titulo: 'Dias Pico', columnas: expDiasPico, filas: diasPicoOrdenados, totales: true },
+      ],
+    },
+    distritos: {
+      archivo: 'Reporte_Distritos',
+      titulo: 'Ventas por Distrito',
+      secciones: [
+        { titulo: 'Ventas por Distrito', columnas: expDistritos, filas: distritos, totales: true },
+      ],
+    },
+    utilidad: {
+      archivo: 'Reporte_Utilidad',
+      titulo: 'Utilidad por Producto',
+      secciones: [
+        { titulo: 'Utilidad por Producto', columnas: expUtilidad, filas: utilidadPorProducto, totales: true },
+      ],
+    },
+    'sin-rotacion': {
+      archivo: 'Reporte_Sin_Rotacion',
+      titulo: 'Productos Sin Rotacion',
+      secciones: [
+        { titulo: 'Productos Sin Rotacion', columnas: expSinRotacion, filas: productosSinRotacion },
+      ],
+    },
+  };
+
+  const reporteActivo = REPORTES_EXPORTABLES[tab];
+  const registrosExportables = (reporteActivo?.secciones || []).reduce(
+    (acc, s) => acc + (s.filas?.length || 0),
+    0
   );
 
   /* ═══════════ RENDER ═══════════ */
@@ -410,7 +645,30 @@ export default function Reportes() {
       </div>
 
       {/* ════════════ TABS ════════════ */}
-      <Tabs tabs={TABS} tabActual={tab} onChange={setTab} />
+      <div ref={refContenido} className="scroll-mt-4">
+        <Tabs tabs={TABS} tabActual={tab} onChange={setTab} />
+      </div>
+
+      {/* ════════════ CABECERA DEL REPORTE ACTIVO ════════════ */}
+      {reporteActivo && (
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-steel-100 truncate">
+              {reporteActivo.titulo}
+            </h2>
+            <p className="text-xs text-steel-400">
+              {registrosExportables} registro(s)
+              {filtrosAplicados.length > 0
+                ? ` · ${filtrosAplicados.length} filtro(s) aplicado(s)`
+                : ' · sin filtros aplicados'}
+            </p>
+          </div>
+          <BotonesExportar
+            deshabilitado={cargando || registrosExportables === 0}
+            reporte={() => ({ ...reporteActivo, filtros: filtrosAplicados })}
+          />
+        </div>
+      )}
 
       {cargando ? (
         <LoadingSpinner texto="Cargando reportes..." />
@@ -426,65 +684,77 @@ export default function Reportes() {
                   valor={dashboard.ventas_mes || 0}
                   icono={HiOutlineShoppingCart}
                   color="blue"
+                  ayuda="Ver el reporte de ventas por dia"
+                  onClick={() => irATab('ventas-dia')}
                 />
                 <TarjetaResumen
                   titulo="Monto del Mes"
                   valor={formatearMoneda(dashboard.monto_mes || 0)}
                   icono={HiOutlineCash}
                   color="green"
+                  ayuda="Ver el reporte de ventas por dia"
+                  onClick={() => irATab('ventas-dia')}
                 />
                 <TarjetaResumen
                   titulo="Total Clientes"
                   valor={dashboard.total_clientes || 0}
                   icono={HiOutlineUsers}
                   color="purple"
+                  ayuda="Ver el reporte de clientes"
+                  onClick={() => irATab('clientes')}
                 />
                 <TarjetaResumen
                   titulo="Total Productos"
                   valor={dashboard.total_productos || 0}
                   icono={HiOutlineChartBar}
                   color="yellow"
+                  ayuda="Ver el reporte de productos"
+                  onClick={() => irATab('productos')}
                 />
                 <TarjetaResumen
                   titulo="Ventas Pendientes"
                   valor={dashboard.ventas_pendientes || 0}
                   icono={HiOutlineClock}
                   color="red"
+                  ayuda="Ir al listado de ventas"
+                  onClick={irAVentas}
                 />
               </div>
 
               {/* Resumen numerico rapido de general */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <div className="card text-center">
-                  <p className="text-sm text-steel-400">Productos Vendidos</p>
-                  <p className="text-2xl font-bold text-blue-600">
-                    {productosMasVendidos.length}
-                  </p>
-                </div>
-                <div className="card text-center">
-                  <p className="text-sm text-steel-400">Vendedores Activos</p>
-                  <p className="text-2xl font-bold text-emerald-600">
-                    {rankingVendedores.length}
-                  </p>
-                </div>
-                <div className="card text-center">
-                  <p className="text-sm text-steel-400">Clientes Frecuentes</p>
-                  <p className="text-2xl font-bold text-purple-600">
-                    {clientesFrecuentes.length}
-                  </p>
-                </div>
-                <div className="card text-center">
-                  <p className="text-sm text-steel-400">Productos Sin Rotacion</p>
-                  <p className="text-2xl font-bold text-red-600">
-                    {productosSinRotacion.length}
-                  </p>
-                </div>
+                {[
+                  { titulo: 'Productos Vendidos', valor: productosMasVendidos.length, color: 'text-blue-600', destino: 'productos' },
+                  { titulo: 'Vendedores Activos', valor: rankingVendedores.length, color: 'text-emerald-600', destino: 'vendedores' },
+                  { titulo: 'Clientes Frecuentes', valor: clientesFrecuentes.length, color: 'text-purple-600', destino: 'clientes' },
+                  { titulo: 'Productos Sin Rotacion', valor: productosSinRotacion.length, color: 'text-red-600', destino: 'sin-rotacion' },
+                ].map((c) => (
+                  <button
+                    key={c.destino}
+                    type="button"
+                    onClick={() => irATab(c.destino)}
+                    title={`Ver el reporte de ${c.titulo.toLowerCase()}`}
+                    className="card text-center cursor-pointer hover:border-primary-500/50 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 transition-all duration-300"
+                  >
+                    <p className="text-sm text-steel-400">{c.titulo}</p>
+                    <p className={`text-2xl font-bold ${c.color}`}>{c.valor}</p>
+                  </button>
+                ))}
               </div>
 
               {/* Tabla resumen distritos top 5 */}
               {distritos.length > 0 && (
                 <div className="card">
-                  <h3 className="text-lg font-semibold mb-3">Top 5 Distritos</h3>
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h3 className="text-lg font-semibold">Top 5 Distritos</h3>
+                    <button
+                      type="button"
+                      onClick={() => irATab('distritos')}
+                      className="text-sm text-primary-600 hover:text-primary-500 transition-colors"
+                    >
+                      Ver reporte completo
+                    </button>
+                  </div>
                   <TablaGenerica
                     columnas={colDistritos}
                     datos={distritos.slice(0, 5)}

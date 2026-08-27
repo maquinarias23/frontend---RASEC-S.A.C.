@@ -8,7 +8,7 @@ import {
 } from '../config/constants';
 import { formatearMoneda, formatearFecha, formatearFechaHora } from './formato';
 import { numeroALetras } from './numeroALetras';
-import { configFacturacionService } from '../services/comprobantesService';
+import { EMISOR_VACIO, obtenerEmisor, obtenerLogoDataUrl } from './emisorDoc';
 
 // ---------------------------------------------------------------------------
 // Exportacion de la cotizacion a un documento A4 imprimible (Guardar como PDF).
@@ -17,14 +17,8 @@ import { configFacturacionService } from '../services/comprobantesService';
 // librerias de PDF ni del backend, y el usuario obtiene el archivo desde el
 // dialogo de impresion del navegador ("Guardar como PDF").
 //
-// El logo se incrusta como data URL antes de escribir el documento. Una ruta
-// relativa no serviria —el documento vive en about:blank, que no tiene base
-// URL— y una URL remota podria llegar tarde al dialogo de impresion: con base64
-// el logo ya esta resuelto cuando se dispara print().
-//
-// El RUC, la razon social, la direccion y el telefono salen de Administrador →
-// Facturacion: son los mismos datos del emisor que usan los comprobantes
-// electronicos, para no tener dos sitios donde mantener lo mismo.
+// El logo (ya en base64) y los datos del emisor vienen de `emisorDoc`, que es
+// donde se resuelve y se cachea la identidad de la empresa para los documentos.
 // ---------------------------------------------------------------------------
 
 const MS_ESPERA_MAXIMA = 3000;
@@ -34,56 +28,6 @@ const LADO_LOGO_PX = 320;
 // El cierre del <script> del documento generado va partido para que ningun
 // empaquetador que inline este bundle en un HTML corte el script de la pagina.
 const CIERRE_SCRIPT = `<${'/'}script>`;
-
-// Caches de sesion: el logo en base64 y los datos del emisor.
-let logoDataUrlCache = null;
-let emisorCache = null;
-
-const EMISOR_VACIO = { ruc: '', razonSocial: '', direccion: '', telefono: '' };
-
-/**
- * Trae del modulo de Facturacion los datos del emisor que se imprimen. Si la
- * peticion falla, el documento sale igual con la identidad de la empresa y sin
- * las lineas de contacto: exportar nunca se cae por esto.
- */
-async function obtenerEmisor() {
-  if (emisorCache) return emisorCache;
-  try {
-    const { data } = await configFacturacionService.obtenerEmisor();
-    emisorCache = {
-      ruc: data?.ruc_emisor || '',
-      razonSocial: data?.razon_social_emisor || '',
-      direccion: data?.direccion_emisor || '',
-      telefono: data?.telefono_emisor ? (TELEFONO_INPUT.format(data.telefono_emisor) || data.telefono_emisor) : '',
-    };
-    return emisorCache;
-  } catch {
-    return EMISOR_VACIO;
-  }
-}
-
-/**
- * Descarga el logo y lo convierte a data URL. Si falla (offline, 404), cae a la
- * URL absoluta para que el documento siga saliendo con logo cuando haya red.
- */
-async function obtenerLogoDataUrl() {
-  if (logoDataUrlCache) return logoDataUrlCache;
-  const urlAbsoluta = new URL(EMPRESA.LOGO_URL, window.location.origin).href;
-  try {
-    const respuesta = await fetch(urlAbsoluta);
-    if (!respuesta.ok) throw new Error(`HTTP ${respuesta.status}`);
-    const blob = await respuesta.blob();
-    logoDataUrlCache = await new Promise((resolver, rechazar) => {
-      const lector = new FileReader();
-      lector.onload = () => resolver(lector.result);
-      lector.onerror = () => rechazar(lector.error);
-      lector.readAsDataURL(blob);
-    });
-    return logoDataUrlCache;
-  } catch {
-    return urlAbsoluta;
-  }
-}
 
 function esc(valor) {
   if (valor === null || valor === undefined) return '';
