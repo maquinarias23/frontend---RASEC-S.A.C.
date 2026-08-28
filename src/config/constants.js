@@ -574,7 +574,7 @@ export const TIPO_COMPROBANTE = {
   NOTA_DEBITO: 'nota_debito',
 };
 
-// Códigos SUNAT por tipo de comprobante (catálogo 01 SUNAT, campo APIsPERU codigo_tipo_documento)
+// Códigos SUNAT por tipo de comprobante (catálogo 01 SUNAT, campo codigo_tipo_documento)
 export const CODIGO_TIPO_COMPROBANTE = {
   [TIPO_COMPROBANTE.FACTURA]: '01',
   [TIPO_COMPROBANTE.BOLETA]: '03',
@@ -673,6 +673,42 @@ export const TIPO_COMPROBANTE_LABEL = {
   [TIPO_COMPROBANTE.BOLETA]: 'Boleta de Venta',
   [TIPO_COMPROBANTE.NOTA_CREDITO]: 'Nota de Crédito',
   [TIPO_COMPROBANTE.NOTA_DEBITO]: 'Nota de Débito',
+};
+
+// Validación de la serie de un CPE. Mirror de SERIE_COMPROBANTE en
+// backend/config/constants.js: 4 caracteres, letra + 3 alfanuméricos, con la
+// letra que SUNAT asigna al tipo (F factura, B boleta; las notas heredan la
+// letra del comprobante que afectan).
+export const SERIE_COMPROBANTE = {
+  LONGITUD: 4,
+  PATRON: /^[A-Z][A-Z0-9]{3}$/,
+  PREFIJOS_VALIDOS: {
+    [TIPO_COMPROBANTE.FACTURA]: ['F'],
+    [TIPO_COMPROBANTE.BOLETA]: ['B'],
+    [TIPO_COMPROBANTE.NOTA_CREDITO]: ['F', 'B'],
+    [TIPO_COMPROBANTE.NOTA_DEBITO]: ['F', 'B'],
+  },
+  MSG_FORMATO: 'La serie debe tener 4 caracteres: una letra seguida de 3 letras o dígitos (ej. F001, B001, FC01)',
+};
+
+SERIE_COMPROBANTE.validar = (tipoComprobante, serie) => {
+  const valor = String(serie || '').trim().toUpperCase();
+  if (!SERIE_COMPROBANTE.PATRON.test(valor)) return SERIE_COMPROBANTE.MSG_FORMATO;
+  const prefijos = SERIE_COMPROBANTE.PREFIJOS_VALIDOS[tipoComprobante];
+  if (!prefijos) return 'Tipo de comprobante no válido';
+  if (!prefijos.includes(valor[0])) {
+    return `La serie de ${TIPO_COMPROBANTE_LABEL[tipoComprobante]} debe empezar por ${prefijos.join(' o ')} según SUNAT`;
+  }
+  return null;
+};
+
+// Proveedor de facturación electrónica contratado.
+export const PROVEEDOR_CPE = {
+  NOMBRE: 'Factura Perú',
+  PLATAFORMA: 'Facturador Smart',
+  DOMINIO: 'facturadorsmart.pe',
+  URL_DEMO: 'https://demo.facturadorsmart.pe/api',
+  URL_MANUAL: 'https://facturaperu.com.pe/manual_smart/',
 };
 
 // Numeración visible del comprobante: "F001-00000123".

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   HiOutlineUpload, HiOutlineDocumentText, HiOutlineDocumentDownload,
   HiOutlineRefresh, HiOutlineXCircle, HiOutlineSearch, HiOutlineX,
+  HiOutlineClock,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -160,6 +161,28 @@ function TabComprobantes() {
     } catch (err) { toast.error(err.response?.data?.error || 'Error'); }
   };
 
+  // Cierra la anulación: SUNAT procesa la baja de forma asíncrona y hasta que
+  // no se consulta el ticket el comprobante sigue contando como vigente.
+  const handleConsultarBaja = async (comp) => {
+    try {
+      const { data } = await comprobantesService.consultarBaja(comp.id);
+      toast.success(data.anulado
+        ? 'SUNAT aceptó la baja: comprobante anulado'
+        : 'La baja sigue en proceso en SUNAT. Vuelva a consultar en unos minutos.');
+      cargar();
+    } catch (err) { toast.error(err.response?.data?.error || 'Error'); }
+  };
+
+  // Reenvía a SUNAT un comprobante que el proveedor registró pero que quedó
+  // sin constancia (CDR).
+  const handleReenviarSunat = async (comp) => {
+    try {
+      await comprobantesService.reenviarSunat(comp.id);
+      toast.success('Comprobante reenviado a SUNAT');
+      cargar();
+    } catch (err) { toast.error(err.response?.data?.error || 'Error'); }
+  };
+
   const handlePdf = async (comp) => {
     try {
       const { data } = await comprobantesService.descargarPdf(comp.id);
@@ -295,7 +318,17 @@ function TabComprobantes() {
                   <HiOutlineRefresh className="w-4 h-4" />
                 </button>
               )}
-              {!fila.anulado && fila.proveedor_external_id && (
+              {fila.estado === ESTADO_COMPROBANTE.EMITIDO && fila.proveedor_external_id && !fila.anulado && (
+                <button onClick={() => handleReenviarSunat(fila)} className="p-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-all" title="Reenviar a SUNAT">
+                  <HiOutlineUpload className="w-4 h-4" />
+                </button>
+              )}
+              {fila.estado === ESTADO_COMPROBANTE.EN_BAJA_SUNAT && (
+                <button onClick={() => handleConsultarBaja(fila)} className="p-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 transition-all" title="Consultar estado de la baja en SUNAT">
+                  <HiOutlineClock className="w-4 h-4" />
+                </button>
+              )}
+              {!fila.anulado && fila.estado !== ESTADO_COMPROBANTE.EN_BAJA_SUNAT && fila.proveedor_external_id && (
                 <button onClick={() => handleAnular(fila)} className="p-1.5 rounded-lg border border-red-500/20 bg-red-500/5 text-red-400 hover:bg-red-500/15 transition-all" title="Anular">
                   <HiOutlineXCircle className="w-4 h-4" />
                 </button>

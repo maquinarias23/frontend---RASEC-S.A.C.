@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
 import { configFacturacionService } from '../../services/comprobantesService';
-import { TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV, COMPROBANTE_NUMERO, TELEFONO_INPUT } from '../../config/constants';
+import {
+  TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV,
+  COMPROBANTE_NUMERO, TELEFONO_INPUT, SERIE_COMPROBANTE, PROVEEDOR_CPE,
+} from '../../config/constants';
 import toast from 'react-hot-toast';
 import {
   HiOutlineKey, HiOutlinePlusCircle, HiOutlineCheck, HiOutlineX,
   HiOutlineDocumentText, HiOutlineOfficeBuilding, HiOutlineShieldCheck,
   HiOutlineCollection, HiOutlineLightningBolt, HiOutlineSave, HiOutlineGlobeAlt,
+  HiOutlineStatusOnline, HiOutlineExclamation, HiOutlineLogin,
 } from 'react-icons/hi';
 
-const PROVEEDOR_NOMBRE = 'APIsPERU';
-const PROVEEDOR_DESCRIPCION = 'Facturador Smart (facturadorsmart.pe)';
+const PROVEEDOR_NOMBRE = PROVEEDOR_CPE.NOMBRE;
+const PROVEEDOR_DESCRIPCION = `${PROVEEDOR_CPE.PLATAFORMA} (${PROVEEDOR_CPE.DOMINIO})`;
 const MASCARA_TOKEN_SUFIJO = '****';
 
 const FORM_INICIAL = {
@@ -25,12 +29,18 @@ const FORM_INICIAL = {
   activo: false,
 };
 
+const CREDENCIALES_INICIALES = { email: '', password: '' };
+
 export default function ConfigFacturacion() {
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(FORM_INICIAL);
   const [nuevaSerie, setNuevaSerie] = useState({ tipo_comprobante: '', serie: '' });
+  const [credenciales, setCredenciales] = useState(CREDENCIALES_INICIALES);
+  const [autenticando, setAutenticando] = useState(false);
+  const [probando, setProbando] = useState(false);
+  const [diagnostico, setDiagnostico] = useState(null);
 
   const cargar = async () => {
     setLoading(true);
@@ -76,9 +86,53 @@ export default function ConfigFacturacion() {
     setSaving(false);
   };
 
+  // Pide el token al proveedor con las credenciales del panel (POST /login del
+  // manual) en lugar de copiarlo a mano, que es de donde salen los errores.
+  const handleAutenticar = async () => {
+    if (!credenciales.email || !credenciales.password) {
+      toast.error('Ingrese el correo y la contraseña de su cuenta de ' + PROVEEDOR_NOMBRE);
+      return;
+    }
+    setAutenticando(true);
+    try {
+      const { data } = await configFacturacionService.autenticar({
+        ...credenciales,
+        proveedor_base_url: form.proveedor_base_url,
+      });
+      toast.success(data.mensaje);
+      setCredenciales(CREDENCIALES_INICIALES);
+      cargar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'No se pudo obtener el token');
+    }
+    setAutenticando(false);
+  };
+
+  const handleProbarConexion = async () => {
+    setProbando(true);
+    setDiagnostico(null);
+    try {
+      const { data } = await configFacturacionService.probarConexion();
+      setDiagnostico({ ok: true, mensaje: data.mensaje, advertencias: data.advertencias || [] });
+      toast.success(data.mensaje);
+    } catch (err) {
+      const mensaje = err.response?.data?.error || 'No se pudo conectar con el proveedor';
+      setDiagnostico({ ok: false, mensaje, advertencias: [] });
+      toast.error(mensaje);
+    }
+    setProbando(false);
+  };
+
   const handleCrearSerie = async () => {
     if (!nuevaSerie.tipo_comprobante || !nuevaSerie.serie) {
       toast.error('Complete tipo y serie');
+      return;
+    }
+    // Se valida aquí antes de llamar al backend para dar el motivo exacto:
+    // una serie con el prefijo equivocado hace que SUNAT rechace el comprobante.
+    const errorSerie = SERIE_COMPROBANTE.validar(nuevaSerie.tipo_comprobante, nuevaSerie.serie);
+    if (errorSerie) {
+      toast.error(errorSerie);
       return;
     }
     try {
@@ -115,6 +169,14 @@ export default function ConfigFacturacion() {
   }
 
   const seriesActivas = series.filter(s => s.activa).length;
+
+  // Ayuda contextual del formulario de series: prefijo exigido y error en vivo.
+  const prefijosSerie = SERIE_COMPROBANTE.PREFIJOS_VALIDOS[nuevaSerie.tipo_comprobante] || [];
+  const esNota = nuevaSerie.tipo_comprobante === TIPO_COMPROBANTE.NOTA_CREDITO
+    || nuevaSerie.tipo_comprobante === TIPO_COMPROBANTE.NOTA_DEBITO;
+  const errorNuevaSerie = nuevaSerie.tipo_comprobante && nuevaSerie.serie
+    ? SERIE_COMPROBANTE.validar(nuevaSerie.tipo_comprobante, nuevaSerie.serie)
+    : null;
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-fade-in">
@@ -190,8 +252,12 @@ export default function ConfigFacturacion() {
                 <HiOutlineGlobeAlt className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-steel-500" />
                 <input type="text" className="input-field font-mono text-sm pl-9" value={form.proveedor_base_url}
                   onChange={e => setForm(prev => ({ ...prev, proveedor_base_url: e.target.value }))}
-                  placeholder="https://demo.facturadorsmart.pe/api" />
+                  placeholder={PROVEEDOR_CPE.URL_DEMO} />
               </div>
+              <p className="text-[10px] text-steel-400">
+                Subdominio de su empresa en {PROVEEDOR_CPE.DOMINIO} terminado en <span className="font-mono">/api</span>.
+                Para pruebas: <span className="font-mono">{PROVEEDOR_CPE.URL_DEMO}</span>
+              </p>
             </div>
 
             <div className="space-y-1">
@@ -207,6 +273,74 @@ export default function ConfigFacturacion() {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Obtener el token con las credenciales del panel del proveedor */}
+          <div className="mt-5 p-4 bg-steel-900/60 rounded-xl border border-steel-700/40">
+            <p className="text-sm font-medium text-steel-200 mb-1">¿No tiene el token a la mano?</p>
+            <p className="text-xs text-steel-400 mb-3">
+              Ingrese el correo y la contraseña con los que entra al panel de {PROVEEDOR_CPE.PLATAFORMA} y
+              el sistema obtendrá el token por usted. Las credenciales no se guardan.
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-1">
+                <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Correo</label>
+                <input type="email" autoComplete="off" className="input-field text-sm" value={credenciales.email}
+                  onChange={e => setCredenciales(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="usuario@empresa.com" />
+              </div>
+              <div className="flex-1 space-y-1">
+                <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Contraseña</label>
+                <input type="password" autoComplete="new-password" className="input-field text-sm" value={credenciales.password}
+                  onChange={e => setCredenciales(prev => ({ ...prev, password: e.target.value }))}
+                  placeholder="••••••••" />
+              </div>
+              <button onClick={handleAutenticar} disabled={autenticando}
+                className="btn-secondary flex items-center justify-center gap-2 whitespace-nowrap">
+                {autenticando
+                  ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  : <HiOutlineLogin className="w-5 h-5" />}
+                Obtener token
+              </button>
+            </div>
+          </div>
+
+          {/* Prueba de conexión y diagnóstico previo a facturar */}
+          <div className="mt-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-steel-400">
+                Verifica credenciales, datos del emisor y series antes de emitir el primer comprobante.
+              </p>
+              <button onClick={handleProbarConexion} disabled={probando}
+                className="btn-secondary flex items-center gap-2 whitespace-nowrap">
+                {probando
+                  ? <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  : <HiOutlineStatusOnline className="w-5 h-5" />}
+                Probar conexión
+              </button>
+            </div>
+
+            {diagnostico && (
+              <div className={`rounded-xl border p-4 text-sm animate-fade-in ${diagnostico.ok
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
+                : 'bg-red-500/10 border-red-500/30 text-red-500'
+              }`}>
+                <p className="font-semibold flex items-center gap-2">
+                  {diagnostico.ok ? <HiOutlineCheck className="w-4 h-4" /> : <HiOutlineX className="w-4 h-4" />}
+                  {diagnostico.mensaje}
+                </p>
+                {diagnostico.advertencias.length > 0 && (
+                  <ul className="mt-3 space-y-1.5 text-amber-500">
+                    {diagnostico.advertencias.map((a, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <HiOutlineExclamation className="w-4 h-4 mt-0.5 shrink-0" />
+                        <span>{a}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Toggle activo */}
@@ -356,16 +490,29 @@ export default function ConfigFacturacion() {
             </div>
             <div className="w-40 space-y-1">
               <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Serie</label>
-              <input type="text" className="input-field font-mono tracking-widest text-center uppercase" maxLength={10}
+              <input type="text" className="input-field font-mono tracking-widest text-center uppercase"
+                maxLength={SERIE_COMPROBANTE.LONGITUD}
                 value={nuevaSerie.serie}
                 onChange={e => setNuevaSerie(prev => ({ ...prev, serie: e.target.value.toUpperCase() }))}
-                placeholder="F001" />
+                placeholder={prefijosSerie[0] ? `${prefijosSerie[0]}001` : 'F001'} />
             </div>
             <button onClick={handleCrearSerie}
               className="btn-primary flex items-center gap-2 whitespace-nowrap">
               <HiOutlinePlusCircle className="w-5 h-5" /> Crear Serie
             </button>
           </div>
+
+          {/* Aviso del prefijo exigido por SUNAT para el tipo elegido */}
+          {nuevaSerie.tipo_comprobante && (
+            <p className={`-mt-4 mb-6 text-xs flex items-start gap-2 ${errorNuevaSerie ? 'text-red-500' : 'text-steel-400'}`}>
+              <HiOutlineExclamation className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>
+                {errorNuevaSerie || `SUNAT exige que la serie de ${TIPO_COMPROBANTE_LABEL[nuevaSerie.tipo_comprobante]} `
+                  + `empiece por ${prefijosSerie.join(' o ')} y tenga ${SERIE_COMPROBANTE.LONGITUD} caracteres.`}
+                {esNota && ' La nota hereda la letra del comprobante que afecta: F para notas sobre facturas, B para notas sobre boletas.'}
+              </span>
+            </p>
+          )}
 
           {/* Tabla de series */}
           <div className="rounded-xl border border-steel-700/40 overflow-hidden">
