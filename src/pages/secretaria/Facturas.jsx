@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { HiOutlineUpload, HiOutlineDocumentText, HiOutlineDocumentDownload, HiOutlineRefresh, HiOutlineXCircle } from 'react-icons/hi';
+import {
+  HiOutlineUpload, HiOutlineDocumentText, HiOutlineDocumentDownload,
+  HiOutlineRefresh, HiOutlineXCircle, HiOutlineSearch, HiOutlineX,
+} from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
 import TablaGenerica from '../../components/ui/TablaGenerica';
@@ -11,6 +14,7 @@ import ModalWhatsappComprobante from '../../components/shared/ModalWhatsappCompr
 import IconoWhatsapp from '../../components/ui/IconoWhatsapp';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import { comprobantesService } from '../../services/comprobantesService';
+import { exportarComprobantesExcel, ciudadDeVenta } from '../../utils/exportarComprobantes';
 import { TIPO_COMPROBANTE_LABEL, ESTADO_COMPROBANTE, COMPROBANTE_NUMERO, WA_COMPROBANTE } from '../../config/constants';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
@@ -44,11 +48,21 @@ export default function Facturas() {
   );
 }
 
+const FILTROS_INICIALES = {
+  busqueda: '', tipo_comprobante: '', estado: '', vendedor_user_id: '',
+  fecha_desde: '', fecha_hasta: '', anulado: '', page: 1,
+};
+
 function TabComprobantes() {
   const [comprobantes, setComprobantes] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [filtros, setFiltros] = useState({ tipo_comprobante: '', estado: '', page: 1 });
+  const [filtros, setFiltros] = useState(FILTROS_INICIALES);
+  // El texto del buscador se mantiene aparte y se aplica con un respiro, para
+  // no disparar una consulta por cada tecla.
+  const [textoBusqueda, setTextoBusqueda] = useState('');
+  const [vendedores, setVendedores] = useState([]);
+  const [exportando, setExportando] = useState(false);
   const [modalWhatsapp, setModalWhatsapp] = useState(null);
 
   const cargar = async () => {
@@ -62,6 +76,63 @@ function TabComprobantes() {
   };
 
   useEffect(() => { cargar(); }, [filtros]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFiltros((prev) => (prev.busqueda === textoBusqueda ? prev : { ...prev, busqueda: textoBusqueda, page: 1 }));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [textoBusqueda]);
+
+  useEffect(() => {
+    api.get('/ventas/vendedores-activos')
+      .then(({ data }) => setVendedores(Array.isArray(data) ? data : []))
+      .catch(() => setVendedores([]));
+  }, []);
+
+  const hayFiltros = Object.entries(filtros)
+    .some(([k, v]) => k !== 'page' && v !== '' && v !== undefined);
+
+  const limpiarFiltros = () => { setTextoBusqueda(''); setFiltros(FILTROS_INICIALES); };
+
+  /** Describe los filtros activos, para dejarlos escritos en el Excel. */
+  const describirFiltros = () => {
+    const partes = [];
+    if (filtros.busqueda) partes.push(`"${filtros.busqueda}"`);
+    if (filtros.tipo_comprobante) partes.push(TIPO_COMPROBANTE_LABEL[filtros.tipo_comprobante]);
+    if (filtros.estado) partes.push(filtros.estado.replace(/_/g, ' '));
+    if (filtros.vendedor_user_id) {
+      partes.push(vendedores.find((v) => String(v.id) === String(filtros.vendedor_user_id))?.nombres || 'vendedor');
+    }
+    if (filtros.anulado === 'si') partes.push('solo anulados');
+    if (filtros.anulado === 'no') partes.push('sin anulados');
+    if (filtros.fecha_desde || filtros.fecha_hasta) {
+      partes.push(`${filtros.fecha_desde || '…'} a ${filtros.fecha_hasta || '…'}`);
+    }
+    return partes.join(' · ');
+  };
+
+  const exportarExcel = async () => {
+    setExportando(true);
+    try {
+      // Se pide todo lo filtrado, no solo la página en pantalla.
+      const { data } = await comprobantesService.listarTodos({ ...filtros, todos: 'si', page: undefined });
+      if (!data.data?.length) {
+        toast.error('No hay comprobantes para exportar con esos filtros');
+        return;
+      }
+      const r = exportarComprobantesExcel(data.data, { filtrosTexto: describirFiltros() });
+      toast.success(`Excel descargado: ${r.comprobantes} comprobantes, ${r.items} líneas de detalle`);
+      if (data.truncado) {
+        toast('Se exportaron los primeros 5,000 comprobantes. Acota los filtros para el resto.', { icon: '⚠️' });
+      }
+    } catch (err) {
+      console.error('Error al exportar comprobantes:', err);
+      toast.error('No se pudo generar el Excel');
+    } finally {
+      setExportando(false);
+    }
+  };
 
   const handleAnular = async (comp) => {
     const motivo = prompt('Motivo de anulación:');
@@ -103,25 +174,101 @@ function TabComprobantes() {
     { key: 'numero', label: 'N° Comprobante', render: (c) => <span className="font-mono text-xs">{COMPROBANTE_NUMERO.formatear(c.serie, c.numero)}</span> },
     { key: 'tipo_comprobante', label: 'Tipo', render: (c) => <span className="text-xs">{TIPO_COMPROBANTE_LABEL[c.tipo_comprobante]}</span> },
     { key: 'cliente_nombre', label: 'Cliente', render: (c) => <div className="text-xs"><p>{c.cliente_nombre}</p><p className="text-steel-500">{c.cliente_documento}</p></div> },
+    { key: 'vendedor', label: 'Vendedor', render: (c) => (
+      <div className="text-xs">
+        <p>{c.tbl_ventas?.tbl_usuarios?.nombres || '-'}</p>
+        {c.sale_order_id && <p className="text-steel-500">Venta #{c.sale_order_id}</p>}
+      </div>
+    ) },
+    { key: 'ciudad', label: 'Ciudad / Destino', render: (c) => (
+      <span className="text-xs text-steel-300">{ciudadDeVenta(c.tbl_ventas) || '-'}</span>
+    ) },
     { key: 'total', label: 'Total', render: (c) => formatearMoneda(c.total) },
     { key: 'estado', label: 'Estado', render: (c) => <ComprobantesBadge estado={c.estado} /> },
-    { key: 'fecha', label: 'Fecha', render: (c) => formatearFechaHora(c.fecha_emision) },
+    { key: 'emitido_por', label: 'Emitido por', render: (c) => (
+      <div className="text-xs">
+        <p className="text-steel-200">{c.tbl_usuarios?.nombres || '-'}</p>
+        <p className="text-steel-500">{formatearFechaHora(c.fecha_emision)}</p>
+      </div>
+    ) },
   ];
 
   return (
     <div className="space-y-3">
       {/* Filtros */}
-      <div className="flex gap-2 items-end">
-        <select className="input-field w-40" value={filtros.tipo_comprobante}
-          onChange={e => setFiltros(prev => ({ ...prev, tipo_comprobante: e.target.value, page: 1 }))}>
-          <option value="">Todos los tipos</option>
-          {Object.entries(TIPO_COMPROBANTE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select className="input-field w-40" value={filtros.estado}
-          onChange={e => setFiltros(prev => ({ ...prev, estado: e.target.value, page: 1 }))}>
-          <option value="">Todos los estados</option>
-          {Object.values(ESTADO_COMPROBANTE).map(e => <option key={e} value={e}>{e.replace(/_/g, ' ').toUpperCase()}</option>)}
-        </select>
+      <div className="card space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <HiOutlineSearch className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-steel-400 pointer-events-none" />
+            <input
+              className="input-field !pl-9 !pr-9"
+              placeholder="Buscar por cliente, documento, vendedor, producto, ciudad, N° de comprobante o N° de venta…"
+              value={textoBusqueda}
+              onChange={e => setTextoBusqueda(e.target.value)}
+            />
+            {textoBusqueda && (
+              <button onClick={() => setTextoBusqueda('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200" title="Limpiar">
+                <HiOutlineX className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <button onClick={exportarExcel} disabled={exportando}
+            className="btn-secondary !py-2 !text-xs flex items-center justify-center gap-1.5 disabled:opacity-50 whitespace-nowrap"
+            title="Descargar en Excel todos los comprobantes que cumplen los filtros">
+            <HiOutlineDocumentDownload className="w-4 h-4" />
+            {exportando ? 'Generando…' : 'Exportar Excel'}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-end">
+          <select className="input-field w-40" value={filtros.tipo_comprobante}
+            onChange={e => setFiltros(prev => ({ ...prev, tipo_comprobante: e.target.value, page: 1 }))}>
+            <option value="">Todos los tipos</option>
+            {Object.entries(TIPO_COMPROBANTE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+
+          <select className="input-field w-44" value={filtros.estado}
+            onChange={e => setFiltros(prev => ({ ...prev, estado: e.target.value, page: 1 }))}>
+            <option value="">Todos los estados</option>
+            {Object.values(ESTADO_COMPROBANTE).map(e => <option key={e} value={e}>{e.replace(/_/g, ' ').toUpperCase()}</option>)}
+          </select>
+
+          <select className="input-field w-48" value={filtros.vendedor_user_id}
+            onChange={e => setFiltros(prev => ({ ...prev, vendedor_user_id: e.target.value, page: 1 }))}>
+            <option value="">Todos los vendedores</option>
+            {vendedores.map(v => <option key={v.id} value={v.id}>{v.nombres}</option>)}
+          </select>
+
+          <select className="input-field w-36" value={filtros.anulado}
+            onChange={e => setFiltros(prev => ({ ...prev, anulado: e.target.value, page: 1 }))}>
+            <option value="">Anulados y no</option>
+            <option value="no">Sin anulados</option>
+            <option value="si">Solo anulados</option>
+          </select>
+
+          <label className="text-xs text-steel-400">
+            Desde
+            <input type="date" className="input-field w-40 mt-0.5" value={filtros.fecha_desde}
+              onChange={e => setFiltros(prev => ({ ...prev, fecha_desde: e.target.value, page: 1 }))} />
+          </label>
+          <label className="text-xs text-steel-400">
+            Hasta
+            <input type="date" className="input-field w-40 mt-0.5" value={filtros.fecha_hasta}
+              onChange={e => setFiltros(prev => ({ ...prev, fecha_hasta: e.target.value, page: 1 }))} />
+          </label>
+
+          {hayFiltros && (
+            <button onClick={limpiarFiltros} className="btn-ghost !py-2 !text-xs flex items-center gap-1">
+              <HiOutlineX className="w-4 h-4" /> Limpiar filtros
+            </button>
+          )}
+        </div>
+
+        <p className="text-xs text-steel-400">
+          {total} comprobante{total === 1 ? '' : 's'}
+          {hayFiltros && ' con los filtros aplicados'}
+        </p>
       </div>
 
       <div className="card">

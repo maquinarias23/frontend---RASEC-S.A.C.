@@ -1,34 +1,154 @@
-import { useState } from 'react';
-import { HiOutlineEye, HiOutlineGift } from 'react-icons/hi';
+import { useState, useMemo } from 'react';
+import {
+  HiOutlineEye, HiOutlineGift, HiOutlineSearch, HiOutlineX, HiOutlineDocumentDownload,
+} from 'react-icons/hi';
+import toast from 'react-hot-toast';
 import useCrud from '../../hooks/useCrud';
 import TablaGenerica from '../../components/ui/TablaGenerica';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import Modal from '../../components/ui/Modal';
 import ListaComprobantesVenta from '../../components/shared/ListaComprobantesVenta';
 import TotalizadorVenta from '../../components/shared/TotalizadorVenta';
+import BadgeFacturacion from '../../components/shared/BadgeFacturacion';
+import { estaFacturada, comprobanteVigente } from '../../utils/facturacionVenta';
+import { exportarVentasExcel } from '../../utils/exportarVentas';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
-import { ESTADO_VENTA, TIPO_ENTREGA } from '../../config/constants';
+import { ESTADO_VENTA, TIPO_ENTREGA, COMPROBANTE_NUMERO } from '../../config/constants';
 
 const columnas = [
   { key: 'id', label: 'N° Venta' },
   { key: 'cliente', label: 'Cliente', render: (f) => f.tbl_clientes?.nombre || '-' },
+  { key: 'vendedor', label: 'Vendedor', render: (f) => f.tbl_usuarios?.nombres || '-' },
   { key: 'total', label: 'Total', render: (f) => formatearMoneda(f.total) },
   { key: 'estado_venta', label: 'Estado', render: (f) => <EstadoBadge estado={f.estado_venta} /> },
+  { key: 'facturacion', label: 'Facturación', render: (f) => <BadgeFacturacion venta={f} /> },
   { key: 'fecha', label: 'Fecha', render: (f) => formatearFechaHora(f.fecha_hora_registro) },
 ];
+
+const FILTROS_FACTURACION = [
+  { value: '', label: 'Todas' },
+  { value: 'facturadas', label: 'Facturadas' },
+  { value: 'sin_facturar', label: 'Sin facturar' },
+];
+
+/**
+ * Texto sobre el que corre el buscador. Se arma una sola vez por venta e
+ * incluye lo que alguien escribiría para encontrarla: número, cliente,
+ * vendedor, productos y número de comprobante.
+ */
+const textoBuscable = (v) => {
+  const comp = comprobanteVigente(v);
+  return [
+    v.id,
+    v.tbl_clientes?.nombre,
+    v.tbl_clientes?.dni,
+    v.tbl_usuarios?.nombres,
+    v.estado_venta,
+    ...(v.items_venta || []).map((i) => i.tbl_productos?.nombre),
+    comp ? COMPROBANTE_NUMERO.formatear(comp.serie, comp.numero) : '',
+    comp?.tbl_usuarios?.nombres,
+  ].filter(Boolean).join(' ').toLowerCase();
+};
 
 export default function VentasSecretaria() {
   const { datos, cargando } = useCrud('/ventas');
   const [detalle, setDetalle] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroFactura, setFiltroFactura] = useState('');
+
+  const ventasFiltradas = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    return (datos || []).filter((v) => {
+      if (filtroFactura === 'facturadas' && !estaFacturada(v)) return false;
+      if (filtroFactura === 'sin_facturar' && estaFacturada(v)) return false;
+      if (!q) return true;
+      return textoBuscable(v).includes(q);
+    });
+  }, [datos, busqueda, filtroFactura]);
+
+  const totalFacturadas = useMemo(() => (datos || []).filter(estaFacturada).length, [datos]);
+
+  /** Deja escrito en el Excel con qué filtros se armó. */
+  const describirFiltros = () => {
+    const partes = [];
+    if (busqueda.trim()) partes.push(`"${busqueda.trim()}"`);
+    const etiqueta = FILTROS_FACTURACION.find((f) => f.value === filtroFactura)?.label;
+    if (filtroFactura) partes.push(etiqueta);
+    return partes.join(' · ');
+  };
+
+  // Se exporta lo que está en pantalla: si hay filtros aplicados, el Excel sale
+  // filtrado igual, sin sorpresas entre lo que se ve y lo que se descarga.
+  const exportar = () => {
+    if (ventasFiltradas.length === 0) {
+      toast.error('No hay ventas para exportar con esos filtros');
+      return;
+    }
+    try {
+      const r = exportarVentasExcel(ventasFiltradas, { filtrosTexto: describirFiltros() });
+      toast.success(`Excel descargado: ${r.ventas} ventas, ${r.productos} productos, ${r.pagos} pagos`);
+    } catch (err) {
+      console.error('Error al exportar ventas:', err);
+      toast.error('No se pudo generar el Excel');
+    }
+  };
 
   return (
     <div>
       <h1 className="text-2xl font-bold font-display tracking-wider text-steel-100 mb-6">Ventas (Solo lectura)</h1>
+
+      <div className="card mb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <HiOutlineSearch className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-steel-400 pointer-events-none" />
+            <input
+              className="input-field !pl-9 !pr-9"
+              placeholder="Buscar por N° de venta, cliente, vendedor, producto o N° de comprobante…"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+            />
+            {busqueda && (
+              <button
+                onClick={() => setBusqueda('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-steel-400 hover:text-steel-200"
+                title="Limpiar"
+              >
+                <HiOutlineX className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <select
+            className="input-field sm:w-48"
+            value={filtroFactura}
+            onChange={(e) => setFiltroFactura(e.target.value)}
+          >
+            {FILTROS_FACTURACION.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+
+          <button
+            onClick={exportar}
+            className="btn-secondary !py-2 !text-xs flex items-center justify-center gap-1.5 whitespace-nowrap"
+            title="Descargar en Excel las ventas que se están mostrando"
+          >
+            <HiOutlineDocumentDownload className="w-4 h-4" /> Exportar Excel
+          </button>
+        </div>
+
+        <p className="text-xs text-steel-400 mt-2">
+          {ventasFiltradas.length} de {datos?.length || 0} ventas
+          {' · '}
+          <span className="text-emerald-600">{totalFacturadas} facturadas</span>
+          {' · '}
+          <span className="text-steel-400">{(datos?.length || 0) - totalFacturadas} sin facturar</span>
+        </p>
+      </div>
+
       <div className="card">
         <TablaGenerica
           columnas={columnas}
-          datos={datos}
+          datos={ventasFiltradas}
           cargando={cargando}
+          vacio={busqueda || filtroFactura ? 'Ninguna venta coincide con la búsqueda.' : 'No hay ventas.'}
           acciones={(fila) => (
             <button onClick={() => setDetalle(fila)} className="text-blue-600 hover:text-blue-700" title="Ver detalle">
               <HiOutlineEye className="w-4 h-4" />
@@ -55,6 +175,7 @@ export default function VentasSecretaria() {
                 )}
               </div>
               <div><span className="text-steel-400 block text-xs mb-0.5">Fecha</span><span className="text-steel-100">{formatearFechaHora(detalle.fecha_hora_registro)}</span></div>
+              <div><span className="text-steel-400 block text-xs mb-0.5">Facturación</span><BadgeFacturacion venta={detalle} /></div>
             </div>
 
             {/* Dirección de envío */}
