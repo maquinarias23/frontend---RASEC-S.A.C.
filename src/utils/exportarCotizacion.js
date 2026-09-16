@@ -6,16 +6,23 @@ import {
   ORIGEN_COTIZACION,
   TELEFONO_INPUT,
 } from '../config/constants';
-import { formatearMoneda, formatearFecha, formatearFechaHora } from './formato';
+import { formatearFecha } from './formato';
 import { numeroALetras } from './numeroALetras';
 import { EMISOR_VACIO, obtenerEmisor, obtenerLogoDataUrl } from './emisorDoc';
 
 // ---------------------------------------------------------------------------
 // Exportacion de la cotizacion a un documento A4 imprimible (Guardar como PDF).
 //
-// El documento se arma como HTML y se abre en una ventana propia: no depende de
-// librerias de PDF ni del backend, y el usuario obtiene el archivo desde el
-// dialogo de impresion del navegador ("Guardar como PDF").
+// El documento calca la representacion impresa de la factura electronica que
+// emite el proveedor: mismo encabezado (logo + razon social a la izquierda,
+// recuadro de RUC / tipo de documento / numero a la derecha), la misma lista de
+// datos "etiqueta : valor", la misma grilla Cant. | Unidad | Descripcion |
+// P.Unit | Dto. | Total y el mismo pie de totales con el importe en letras. El
+// cliente recibe asi la misma hoja cotice o compre.
+//
+// Se arma como HTML y se abre en una ventana propia: no depende de librerias de
+// PDF ni del backend, y el usuario obtiene el archivo desde el dialogo de
+// impresion del navegador ("Guardar como PDF").
 //
 // El logo (ya en base64) y los datos del emisor vienen de `emisorDoc`, que es
 // donde se resuelve y se cachea la identidad de la empresa para los documentos.
@@ -43,6 +50,15 @@ function aNumero(valor) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Importes sin simbolo de moneda: en la factura el "S/" vive en la cabecera de
+// los totales, no repetido en cada celda.
+function importe(valor) {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(aNumero(valor));
+}
+
 const ESTADO_SELLO = {
   [ESTADO_COTIZACION.CONVERTIDA_A_VENTA]: { texto: 'CONVERTIDA A VENTA', clase: 'sello--ok' },
   [ESTADO_COTIZACION.CANCELADA]: { texto: 'ANULADA', clase: 'sello--no' },
@@ -67,6 +83,11 @@ function resolverEstado(estado) {
   return ESTADO_DESDE_PROSPECTO[estado] || ESTADO_COTIZACION.PENDIENTE_WHATSAPP;
 }
 
+function unidadDeItem(item) {
+  const codigo = item.tbl_productos?.unidad_medida || item.unidad_medida || '';
+  return COTIZACION_EXPORT.UNIDAD_CORTA[codigo] || COTIZACION_EXPORT.UNIDAD_DEFECTO;
+}
+
 /**
  * Lleva la cotizacion (web o de prospecto) a un shape unico para el documento.
  * Acepta `items` (cotizacion web) o `items_cotizacion` (prospecto).
@@ -78,22 +99,31 @@ function normalizarCotizacion(cotizacion) {
     const esRegalo = !!item.es_regalo;
     const cantidad = aNumero(item.cantidad);
     const precioUnitario = esRegalo ? 0 : aNumero(item.precio_unitario);
+    const descuento = esRegalo ? 0 : aNumero(item.descuento);
+    const bruto = cantidad * precioUnitario;
     return {
       nombre: item.tbl_productos?.nombre || `Producto #${item.product_id}`,
       codigo: item.product_id ? String(item.product_id).padStart(4, '0') : '',
+      unidad: unidadDeItem(item),
       cantidad,
       precioUnitario,
-      importe: cantidad * precioUnitario,
+      descuento,
+      importe: Math.max(0, bruto - descuento),
       esRegalo,
     };
   });
 
-  const subtotalCalculado = items.reduce((suma, item) => suma + item.importe, 0);
-  const descuentoCalculado = crudos.reduce((suma, item) => suma + aNumero(item.descuento), 0);
+  const subtotalCalculado = items.reduce((suma, item) => suma + item.cantidad * item.precioUnitario, 0);
+  const descuentoCalculado = items.reduce((suma, item) => suma + item.descuento, 0);
 
   const subtotal = cotizacion.subtotal != null ? aNumero(cotizacion.subtotal) : subtotalCalculado;
   const descuento = cotizacion.descuento != null ? aNumero(cotizacion.descuento) : descuentoCalculado;
   const total = cotizacion.total != null ? aNumero(cotizacion.total) : Math.max(0, subtotal - descuento);
+
+  // Los precios cotizados ya incluyen IGV: la operacion gravada se obtiene
+  // quitandoselo al total, igual que imprime la factura.
+  const gravada = Math.round((total / (1 + COTIZACION_EXPORT.IGV_TASA)) * 100) / 100;
+  const igv = Math.round((total - gravada) * 100) / 100;
 
   const emision = cotizacion.fecha_hora || cotizacion.fecha_hora_registro || new Date().toISOString();
   const validez = new Date(emision);
@@ -102,50 +132,68 @@ function normalizarCotizacion(cotizacion) {
   const cliente = cotizacion.tbl_clientes || {};
   const telefono = cliente.telefono_principal || cotizacion.telefono_anonimo || cotizacion.telefono || '';
 
+  const correlativo = String(cotizacion.id ?? '').padStart(COTIZACION_EXPORT.DIGITOS_NUMERO, '0');
+
   return {
-    numero: String(cotizacion.id ?? '').padStart(6, '0'),
+    numero: `${COTIZACION_EXPORT.SERIE_PREFIJO}-${correlativo}`,
     emision,
     validez: validez.toISOString(),
     estado: resolverEstado(cotizacion.estado),
     origen: cotizacion._origen,
     cliente: {
       nombre: cliente.nombre || cotizacion.nombre_anonimo || cotizacion.nombre || 'Cliente no registrado',
-      documento: cliente.dni || '',
+      // Empresas cotizan con RUC y personas con DNI: se imprime el que tenga.
+      documento: cliente.ruc || cliente.dni || '',
+      direccion: cliente.direccion_fiscal || cliente.direccion || '',
       telefono: telefono ? (TELEFONO_INPUT.format(telefono) || telefono) : '',
-      correo: cliente.correo || '',
+      // El correo vive en el cliente o, si no, en el usuario asociado.
+      correo: cliente.email || cliente.correo || cliente.tbl_usuarios?.correo || '',
     },
     items,
     subtotal,
     descuento,
+    gravada,
+    igv,
     total,
   };
 }
 
 // --- Fragmentos del documento ----------------------------------------------
 
-// Las filas se imprimen siempre, con guion cuando no hay dato: las dos cajas
-// quedan a la misma altura y el documento se lee como un formulario.
-function filaDato(etiqueta, valor) {
-  return `<tr><th>${esc(etiqueta)}</th><td>${valor ? esc(valor) : '&mdash;'}</td></tr>`;
+/**
+ * El importe en letras como lo escribe la factura: "Dos mil con 00/100 Soles".
+ * `numeroALetras` devuelve todo en mayusculas (uso habitual en comprobantes),
+ * asi que aqui se pasa a mayuscula inicial y se recapitaliza la moneda.
+ */
+function enLetras(total) {
+  const moneda = COTIZACION_EXPORT.MONEDA_NOMBRE;
+  const texto = numeroALetras(total, moneda);
+  if (!texto) return '';
+  const cuerpo = texto.slice(0, texto.length - moneda.length).toLowerCase();
+  const monedaCapitalizada = moneda.charAt(0) + moneda.slice(1).toLowerCase();
+  return cuerpo.charAt(0).toUpperCase() + cuerpo.slice(1) + monedaCapitalizada;
 }
 
-function listaDatosEmpresa(datos) {
-  return datos.filter(Boolean).map((dato) => `<li>${esc(dato)}</li>`).join('');
+// Las filas se imprimen siempre, con guion cuando no hay dato: la lista queda
+// alineada y el documento se lee como el comprobante.
+function filaDato(etiqueta, valor) {
+  return `<tr><th>${esc(etiqueta)}</th><td class="dp">:</td><td>${valor ? esc(valor) : '&mdash;'}</td></tr>`;
 }
 
 function filasItems(items) {
   return items
-    .map((item, indice) => `
+    .map((item) => `
       <tr>
-        <td class="col-num">${String(indice + 1).padStart(2, '0')}</td>
-        <td>
-          <span class="item-nombre">${esc(item.nombre)}</span>
-          ${item.codigo ? `<span class="item-cod">Cod. ${esc(item.codigo)}</span>` : ''}
-          ${item.esRegalo ? `<span class="item-regalo">${esc(COTIZACION_EXPORT.ETIQUETA_OBSEQUIO)}</span>` : ''}
-        </td>
         <td class="col-cant">${esc(item.cantidad)}</td>
-        <td class="col-pu">${esc(formatearMoneda(item.precioUnitario))}</td>
-        <td class="col-imp">${esc(formatearMoneda(item.importe))}</td>
+        <td class="col-und">${esc(item.unidad)}</td>
+        <td class="col-desc">
+          ${esc(item.nombre)}
+          ${item.esRegalo ? `<span class="item-regalo">${esc(COTIZACION_EXPORT.ETIQUETA_OBSEQUIO)}</span>` : ''}
+          ${item.codigo ? `<span class="item-cod">C&oacute;d. ${esc(item.codigo)}</span>` : ''}
+        </td>
+        <td class="col-pu">${esc(importe(item.precioUnitario))}</td>
+        <td class="col-dto">${esc(importe(item.descuento))}</td>
+        <td class="col-tot">${esc(importe(item.importe))}</td>
       </tr>`)
     .join('');
 }
@@ -153,34 +201,30 @@ function filasItems(items) {
 function bloqueSello(estado) {
   const sello = ESTADO_SELLO[estado];
   if (!sello) return '';
-  return `<div class="sello ${sello.clase}"><span>${esc(sello.texto)}</span></div>`;
+  return `<div class="marca-estado"><span class="sello ${sello.clase}">${esc(sello.texto)}</span></div>`;
 }
 
 // --- Hoja de estilos del documento ------------------------------------------
 
 const ESTILOS = `
-@page { size: A4; margin: 0; }
+@page { size: A4; margin: 14mm 15mm 18mm; }
 
 :root {
-  --tinta: #10192b;
-  --tinta-media: #4b5a70;
-  --tinta-suave: #94a1b3;
-  --rojo: #b91c1c;
-  --rojo-hondo: #7f1d1d;
-  --linea: #d5dbe4;
-  --panel: #f3f5f8;
+  --tinta: #000000;
+  --tinta-media: #333333;
+  --linea: #000000;
   --papel: #ffffff;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html { background: #55606f; }
+html { background: #6b7280; }
 
 body {
-  font-family: 'Barlow', 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-family: 'Open Sans', 'DejaVu Sans', 'Segoe UI', Helvetica, Arial, sans-serif;
   color: var(--tinta);
-  font-size: 10pt;
-  line-height: 1.45;
+  font-size: 9pt;
+  line-height: 1.4;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
   padding: 26px 0;
@@ -191,353 +235,166 @@ body {
   width: 210mm;
   min-height: 297mm;
   margin: 0 auto;
-  padding: 13mm 14mm 10mm;
+  padding: 14mm 15mm 18mm;
   background: var(--papel);
   box-shadow: 0 18px 60px rgba(0,0,0,.45);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
-
-/* Marcas de esquina: guino a los planos tecnicos de maquinaria */
-.hoja::before, .hoja::after {
-  content: '';
-  position: absolute;
-  width: 9mm; height: 9mm;
-  border: 1px solid var(--tinta-suave);
-  opacity: .5;
-}
-.hoja::before { top: 5mm; left: 5mm; border-right: 0; border-bottom: 0; }
-.hoja::after { bottom: 5mm; right: 5mm; border-left: 0; border-top: 0; }
-
-.marca-agua {
-  position: absolute;
-  top: 46%; left: 50%;
-  width: 128mm;
-  transform: translate(-50%, -50%) rotate(-13deg);
-  opacity: .04;
-  z-index: 0;
-  pointer-events: none;
-}
-.marca-agua img { width: 100%; display: block; }
-
-.hoja > *:not(.marca-agua) { position: relative; z-index: 1; }
 
 /* ---------- Cabecera ---------- */
 .cab {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
-  gap: 8mm;
-  padding-bottom: 4mm;
+  gap: 7mm;
+  margin-bottom: 8mm;
 }
 
-.cab-marca { display: flex; align-items: center; gap: 5mm; }
+.cab-logo { width: 30mm; flex: none; }
+.cab-logo img { width: 100%; height: auto; display: block; }
 
-.logo-marco {
-  width: 30mm; height: 30mm;
-  flex: none;
-  padding: 1.6mm;
-  border: 1.5px solid var(--tinta);
-  background: var(--papel);
-  box-shadow: 3px 3px 0 rgba(16,25,43,.12);
+.cab-emisor { flex: 1; padding-top: 2mm; min-width: 0; }
+.cab-emisor h1 {
+  font-size: 15pt;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: .01em;
 }
-.logo-marco img { width: 100%; height: 100%; object-fit: contain; display: block; }
-
-.razon {
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  line-height: .88;
-  white-space: nowrap;
-}
-.razon span { display: block; font-size: 25pt; letter-spacing: .085em; }
-.razon em {
-  display: block;
-  font-style: normal;
-  font-size: 21pt;
-  letter-spacing: .175em;
-  color: var(--rojo);
-}
-
-.rubro {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+.cab-emisor p {
   font-size: 8.5pt;
-  text-transform: uppercase;
-  letter-spacing: .14em;
   color: var(--tinta-media);
-  margin-top: 1.2mm;
-  padding-top: 1.2mm;
-  border-top: 1px solid var(--linea);
+  line-height: 1.5;
+  margin-top: 1.4mm;
 }
 
-.datos-empresa {
-  list-style: none;
-  margin-top: 1.6mm;
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 9pt;
-  color: var(--tinta-media);
-  line-height: 1.35;
-}
-.datos-empresa li::before {
-  content: '';
-  display: inline-block;
-  width: 2mm; height: 1px;
-  background: var(--rojo);
-  vertical-align: middle;
-  margin-right: 1.6mm;
-}
-
-/* Estampa del documento */
+/* Recuadro del documento: RUC / tipo / numero */
 .doc {
   flex: none;
-  width: 62mm;
-  border: 1.5px solid var(--tinta);
-  background: var(--papel);
-  box-shadow: 3px 3px 0 rgba(185,28,28,.16);
-}
-.doc-tipo {
-  background: var(--rojo);
-  color: #fff;
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  font-size: 15pt;
-  letter-spacing: .3em;
+  width: 56mm;
+  align-self: flex-start;
+  border: 1px solid var(--linea);
+  border-radius: 2.4mm;
+  padding: 3.4mm 3mm;
   text-align: center;
-  padding: 1.4mm 0 .8mm;
+  font-size: 10.5pt;
+  line-height: 1.75;
 }
-.doc-num {
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  font-size: 29pt;
-  line-height: 1;
-  text-align: center;
-  padding: 2.4mm 0 2mm;
-  letter-spacing: .06em;
-  font-variant-numeric: tabular-nums;
-}
-.doc-num small {
-  display: block;
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 8pt;
-  letter-spacing: .3em;
-  color: var(--tinta-suave);
-  margin-bottom: -1mm;
-}
-.doc-meta { width: 100%; border-collapse: collapse; }
-.doc-meta th, .doc-meta td {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 8.5pt;
-  border-top: 1px solid var(--linea);
-  padding: 1.1mm 2.6mm;
-}
-.doc-meta th {
+
+/* ---------- Datos de emision y cliente ---------- */
+.datos { border-collapse: collapse; margin-bottom: 5mm; }
+.datos th, .datos td {
+  font-size: 9pt;
+  font-weight: 400;
   text-align: left;
-  text-transform: uppercase;
-  letter-spacing: .1em;
-  color: var(--tinta-suave);
-  font-weight: 600;
+  vertical-align: top;
+  padding: .35mm 0;
 }
-.doc-meta td { text-align: right; font-weight: 700; }
+.datos th { width: 33mm; }
+.datos .dp { width: 4mm; }
 
-/* Franja industrial */
-.franja {
-  height: 3.4mm;
-  background: repeating-linear-gradient(-45deg, var(--tinta) 0 3.6mm, var(--rojo) 3.6mm 7.2mm);
+/* ---------- Grilla de items ---------- */
+.items {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4mm;
 }
-
-/* ---------- Bloques de datos ---------- */
-.bloques {
-  display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: 4mm;
-  margin: 5mm 0 4.5mm;
-}
-
-.bloque { border: 1px solid var(--linea); background: var(--panel); }
-.bloque h2 {
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  font-size: 11pt;
-  letter-spacing: .22em;
-  color: var(--papel);
-  background: var(--tinta);
-  padding: 1mm 3mm .4mm;
-}
-.bloque table { width: 100%; border-collapse: collapse; }
-.bloque th, .bloque td {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 9.5pt;
-  padding: 1.1mm 3mm;
+.items thead { display: table-header-group; }
+.items th, .items td {
+  border: 1px solid var(--linea);
+  font-size: 9pt;
+  padding: 1.4mm 2mm;
   vertical-align: top;
 }
-.bloque th {
-  text-align: left;
-  width: 29mm;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  color: var(--tinta-media);
-  font-weight: 600;
-}
-.bloque td { font-weight: 700; }
-.bloque tr + tr th, .bloque tr + tr td { border-top: 1px dotted var(--linea); }
-
-/* ---------- Tabla de items ---------- */
-.items { width: 100%; border-collapse: collapse; }
-.items thead { display: table-header-group; }
-.items th {
-  background: var(--tinta);
-  color: var(--papel);
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 9pt;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .14em;
-  padding: 1.6mm 3mm;
-  text-align: left;
-}
-.items td {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 10pt;
-  padding: 2mm 3mm;
-  border-bottom: 1px dotted var(--linea);
-  vertical-align: middle;
-}
+.items th { font-weight: 700; }
 .items tbody tr { page-break-inside: avoid; }
-.items tbody tr:nth-child(even) td { background: rgba(243,245,248,.7); }
 
-.col-num { width: 12mm; text-align: center; font-variant-numeric: tabular-nums; color: var(--rojo); font-weight: 700; }
-.col-cant { width: 17mm; text-align: center; font-variant-numeric: tabular-nums; }
-.col-pu { width: 28mm; text-align: right; font-variant-numeric: tabular-nums; }
-.col-imp { width: 30mm; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
-th.col-num, th.col-cant { text-align: center; }
-th.col-pu, th.col-imp { text-align: right; }
+.col-cant { width: 15mm; text-align: center; }
+.col-und { width: 13mm; text-align: center; }
+.col-pu { width: 21mm; text-align: right; }
+.col-dto { width: 14mm; text-align: right; }
+.col-tot { width: 23mm; text-align: right; }
+th.col-cant, th.col-und { text-align: center; }
+th.col-pu, th.col-dto, th.col-tot { text-align: right; }
+th.col-desc { text-align: left; }
 
-.item-nombre {
-  display: block;
-  font-weight: 700;
-  text-transform: uppercase;
-  line-height: 1.2;
-}
 .item-cod {
-  font-size: 8pt;
-  color: var(--tinta-suave);
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  display: block;
+  font-size: 7.5pt;
+  color: var(--tinta-media);
 }
 .item-regalo {
-  display: inline-block;
-  margin-left: 2mm;
   font-size: 7.5pt;
-  letter-spacing: .12em;
-  padding: 0 1.4mm;
-  border: 1px solid var(--rojo);
-  color: var(--rojo);
-}
-
-/* ---------- Cierre ---------- */
-.cierre {
-  display: grid;
-  grid-template-columns: 1fr 74mm;
-  gap: 6mm;
-  margin-top: 5mm;
-  page-break-inside: avoid;
-}
-
-.condiciones h3 {
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  font-size: 10.5pt;
-  letter-spacing: .2em;
-  border-bottom: 1.5px solid var(--tinta);
-  padding-bottom: .6mm;
-  margin-bottom: 2mm;
-}
-.condiciones ol { margin-left: 4.5mm; font-size: 8.6pt; color: var(--tinta-media); line-height: 1.5; }
-.condiciones li::marker { color: var(--rojo); font-weight: 700; }
-
-.totales { width: 100%; border-collapse: collapse; }
-.totales th, .totales td {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 10pt;
-  padding: 1.5mm 3mm;
-  border-bottom: 1px solid var(--linea);
-}
-.totales th { text-align: left; text-transform: uppercase; letter-spacing: .12em; color: var(--tinta-media); font-weight: 600; }
-.totales td { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
-.totales .fila-desc th, .totales .fila-desc td { color: var(--rojo-hondo); }
-.totales .fila-total th, .totales .fila-total td {
-  background: var(--rojo);
-  color: #fff;
-  border-bottom: 0;
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  font-size: 15pt;
-  letter-spacing: .12em;
-  padding: 1.6mm 3mm .9mm;
-}
-
-.letras {
-  margin-top: 3mm;
   border: 1px solid var(--tinta);
-  border-left: 4px solid var(--rojo);
-  padding: 1.4mm 3mm;
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 9pt;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-  page-break-inside: avoid;
+  padding: 0 1.2mm;
+  margin-left: 1.5mm;
+  white-space: nowrap;
 }
-.letras b { color: var(--rojo); letter-spacing: .16em; margin-right: 1.5mm; }
 
-.firmas {
+/* ---------- Totales e importe en letras ---------- */
+.cierre {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14mm;
-  margin-top: auto;
-  padding-top: 18mm;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 6mm;
   page-break-inside: avoid;
 }
-.firma { text-align: center; }
-.firma .linea { border-top: 1px solid var(--tinta); margin-bottom: 1.2mm; }
-.firma span {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 8.5pt;
-  text-transform: uppercase;
-  letter-spacing: .13em;
+
+.totales { border-collapse: collapse; margin-left: auto; }
+.totales th, .totales td {
+  font-size: 9pt;
+  font-weight: 400;
+  padding: .5mm 0 .5mm 6mm;
+  white-space: nowrap;
+}
+.totales th { text-align: right; }
+.totales td { text-align: right; min-width: 26mm; font-variant-numeric: tabular-nums; }
+.totales .fila-total th, .totales .fila-total td { font-weight: 700; padding-top: 1mm; }
+
+.son { font-size: 10pt; padding-bottom: 1mm; }
+.son b { font-weight: 700; }
+
+/* ---------- Condiciones y vendedor ---------- */
+.condicion { margin-top: 12mm; font-size: 9pt; font-weight: 700; }
+.vendedor { margin-top: 5mm; font-size: 9pt; }
+.vendedor b { display: block; }
+
+.condiciones { margin-top: 12mm; page-break-inside: avoid; }
+.condiciones h2 { font-size: 9pt; font-weight: 700; margin-bottom: 1.5mm; }
+.condiciones ol {
+  margin-left: 4.5mm;
+  font-size: 8pt;
   color: var(--tinta-media);
+  line-height: 1.6;
 }
 
 /* ---------- Sello de estado ---------- */
+.marca-estado { margin-top: 4mm; padding-right: 3mm; text-align: right; }
+
 .sello {
-  position: absolute;
-  bottom: 6mm;
-  left: 50%;
-  transform: translateX(-50%) rotate(-8deg);
-  border: 3px double currentColor;
-  padding: 1.6mm 5mm;
-  font-family: 'Bebas Neue', 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
-  font-size: 17pt;
-  letter-spacing: .16em;
+  display: inline-block;
+  transform: rotate(-3deg);
+  border: 2px solid currentColor;
+  border-radius: 1.5mm;
+  padding: 1.4mm 4mm;
+  font-size: 13pt;
+  font-weight: 700;
+  letter-spacing: .08em;
   white-space: nowrap;
-  opacity: .58;
-  z-index: 2;
+  opacity: .55;
 }
 .sello--ok { color: #15803d; }
-.sello--no { color: var(--rojo); }
+.sello--no { color: #b91c1c; }
 
 /* ---------- Pie ---------- */
 .pie {
-  margin-top: 8mm;
-  padding-top: 3mm;
-  border-top: 2px solid var(--tinta);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 6mm;
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
-  font-size: 8pt;
+  margin-top: auto;
+  padding-top: 10mm;
+  text-align: center;
+  font-size: 9pt;
   color: var(--tinta-media);
-  letter-spacing: .05em;
+  line-height: 1.5;
 }
-.pie strong { color: var(--tinta); letter-spacing: .1em; text-transform: uppercase; }
-.pie-logo { width: 13mm; flex: none; opacity: .9; }
-.pie-logo img { width: 100%; display: block; }
-.pie-nota { text-align: right; text-transform: uppercase; letter-spacing: .09em; }
 
 /* ---------- Barra de accion (solo pantalla) ---------- */
 .barra {
@@ -548,22 +405,22 @@ th.col-pu, th.col-imp { text-align: right; }
   justify-content: center;
   gap: 10px;
   padding: 10px;
-  background: rgba(16,25,43,.96);
+  background: rgba(17,24,39,.96);
   z-index: 50;
 }
 .barra button {
-  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  font-family: inherit;
   font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .14em;
+  font-weight: 600;
+  letter-spacing: .04em;
   padding: 8px 18px;
   border: 0;
+  border-radius: 4px;
   cursor: pointer;
-  background: var(--rojo);
+  background: #b91c1c;
   color: #fff;
 }
-.barra button.secundario { background: transparent; color: #c7cedb; border: 1px solid #46536b; }
+.barra button.secundario { background: transparent; color: #d1d5db; border: 1px solid #4b5563; }
 .barra button:hover { filter: brightness(1.12); }
 body.con-barra { padding-top: 62px; }
 
@@ -571,7 +428,8 @@ body.con-barra { padding-top: 62px; }
   html, body { background: #fff; padding: 0; }
   body.con-barra { padding-top: 0; }
   .barra { display: none !important; }
-  .hoja { box-shadow: none; margin: 0; width: auto; min-height: 0; }
+  /* Los margenes ya los pone @page: la hoja solo ocupa el area util. */
+  .hoja { box-shadow: none; margin: 0; width: auto; padding: 0; min-height: 265mm; }
 }
 `;
 
@@ -591,17 +449,12 @@ export function construirHtmlCotizacion(cotizacion, opciones = {}) {
 
   const origenTexto = c.origen === ORIGEN_COTIZACION.PROSPECTO ? 'Prospecto' : 'Tienda web';
   const estadoTexto = ESTADO_ETIQUETA[c.estado] || '-';
+  const simbolo = COTIZACION_EXPORT.MONEDA_SIMBOLO;
 
-  const datosEmpresa = listaDatosEmpresa([
-    emisor.ruc ? `RUC ${emisor.ruc}` : '',
-    emisor.direccion,
-    emisor.telefono ? `Tel. ${emisor.telefono}` : '',
-  ]);
-
-  const contactoPie = [emisor.telefono ? `Tel. ${emisor.telefono}` : '', EMPRESA.HORARIO]
+  const contactoEmisor = [emisor.telefono ? `Tel. ${emisor.telefono}` : '', EMPRESA.HORARIO]
     .filter(Boolean)
     .map((dato) => esc(dato))
-    .join('&nbsp;&nbsp;·&nbsp;&nbsp;');
+    .join(' &nbsp;·&nbsp; ');
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -610,7 +463,7 @@ export function construirHtmlCotizacion(cotizacion, opciones = {}) {
 <title>Cotizacion ${esc(c.numero)} - ${esc(razonSocial)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@300;400;500;600;700&family=Barlow+Condensed:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <style>${ESTILOS}</style>
 </head>
 <body class="${conBarra ? 'con-barra' : ''}">
@@ -620,116 +473,77 @@ ${conBarra ? `<div class="barra">
 </div>` : ''}
 
 <div class="hoja">
-  <div class="marca-agua"><img src="${esc(logo)}" alt=""></div>
-
   <header class="cab">
-    <div class="cab-marca">
-      <div class="logo-marco">
-        <img id="logo-principal" src="${esc(logo)}" width="${LADO_LOGO_PX}" height="${LADO_LOGO_PX}" alt="${esc(razonSocial)}">
-      </div>
-      <div>
-        <div class="razon">
-          <span>${esc(EMPRESA.MARCA_LINEA_1)}</span>
-          <em>${esc(EMPRESA.MARCA_LINEA_2)}</em>
-        </div>
-        <div class="rubro">${esc(EMPRESA.RUBRO)}</div>
-        <ul class="datos-empresa">${datosEmpresa}</ul>
-      </div>
+    <div class="cab-logo">
+      <img id="logo-principal" src="${esc(logo)}" width="${LADO_LOGO_PX}" height="${LADO_LOGO_PX}" alt="${esc(razonSocial)}">
     </div>
-
+    <div class="cab-emisor">
+      <h1>${esc(razonSocial)}</h1>
+      ${emisor.direccion ? `<p>${esc(emisor.direccion)}</p>` : ''}
+      ${contactoEmisor ? `<p>${contactoEmisor}</p>` : ''}
+    </div>
     <div class="doc">
-      <div class="doc-tipo">${esc(COTIZACION_EXPORT.TITULO_DOC)}</div>
-      <div class="doc-num"><small>N&deg;</small>${esc(c.numero)}</div>
-      <table class="doc-meta">
-        <tbody>
-          <tr><th>Emisi&oacute;n</th><td>${esc(formatearFecha(c.emision))}</td></tr>
-          <tr><th>V&aacute;lida hasta</th><td>${esc(formatearFecha(c.validez))}</td></tr>
-          <tr><th>Moneda</th><td>${esc(COTIZACION_EXPORT.MONEDA_ETIQUETA)}</td></tr>
-        </tbody>
-      </table>
+      ${emisor.ruc ? `RUC ${esc(emisor.ruc)}<br>` : ''}
+      ${esc(COTIZACION_EXPORT.TITULO_DOC)}<br>
+      ${esc(c.numero)}
     </div>
   </header>
 
-  <div class="franja"></div>
-
-  <section class="bloques">
-    <div class="bloque">
-      <h2>Cliente</h2>
-      <table>
-        <tbody>
-          ${filaDato('Señor(es)', c.cliente.nombre)}
-          ${filaDato('DNI / RUC', c.cliente.documento)}
-          ${filaDato('Teléfono', c.cliente.telefono)}
-          ${filaDato('Correo', c.cliente.correo)}
-        </tbody>
-      </table>
-    </div>
-    <div class="bloque">
-      <h2>Referencia</h2>
-      <table>
-        <tbody>
-          ${filaDato('Origen', origenTexto)}
-          ${filaDato('Situación', estadoTexto)}
-          ${filaDato('Atendido por', usuario?.nombres || '')}
-          ${filaDato('Registrada', formatearFechaHora(c.emision))}
-        </tbody>
-      </table>
-    </div>
-  </section>
+  <table class="datos">
+    <tbody>
+      ${filaDato('Fecha de emisión', formatearFecha(c.emision))}
+      ${filaDato('Válida hasta', formatearFecha(c.validez))}
+      ${filaDato('Cliente', c.cliente.nombre)}
+      ${filaDato('DNI / RUC', c.cliente.documento)}
+      ${filaDato('Dirección', c.cliente.direccion)}
+      ${filaDato('Teléfono', c.cliente.telefono)}
+      ${filaDato('Correo', c.cliente.correo)}
+    </tbody>
+  </table>
 
   <table class="items">
     <thead>
       <tr>
-        <th class="col-num">&Iacute;tem</th>
-        <th>Descripci&oacute;n</th>
         <th class="col-cant">Cant.</th>
-        <th class="col-pu">P. Unitario</th>
-        <th class="col-imp">Importe</th>
+        <th class="col-und">Unidad</th>
+        <th class="col-desc">Descripci&oacute;n</th>
+        <th class="col-pu">P.Unit</th>
+        <th class="col-dto">Dto.</th>
+        <th class="col-tot">Total</th>
       </tr>
     </thead>
     <tbody>${filasItems(c.items)}</tbody>
   </table>
 
   <section class="cierre">
-    <div class="condiciones">
-      <h3>Condiciones comerciales</h3>
-      <ol>${COTIZACION_EXPORT.CONDICIONES.map((texto) => `<li>${esc(texto)}</li>`).join('')}</ol>
-    </div>
-    <div>
-      <table class="totales">
-        <tbody>
-          <tr><th>Subtotal</th><td>${esc(formatearMoneda(c.subtotal))}</td></tr>
-          ${c.descuento > 0 ? `<tr class="fila-desc"><th>Descuento</th><td>- ${esc(formatearMoneda(c.descuento))}</td></tr>` : ''}
-          <tr class="fila-total"><th>Total</th><td>${esc(formatearMoneda(c.total))}</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <p class="son">Son: <b>${esc(enLetras(c.total))}</b></p>
+    <table class="totales">
+      <tbody>
+        ${c.descuento > 0 ? `<tr><th>Descuento: ${esc(simbolo)}</th><td>${esc(importe(c.descuento))}</td></tr>` : ''}
+        <tr><th>Op. Gravadas: ${esc(simbolo)}</th><td>${esc(importe(c.gravada))}</td></tr>
+        <tr><th>IGV: ${esc(simbolo)}</th><td>${esc(importe(c.igv))}</td></tr>
+        <tr class="fila-total"><th>Total a pagar: ${esc(simbolo)}</th><td>${esc(importe(c.total))}</td></tr>
+      </tbody>
+    </table>
   </section>
 
-  <div class="letras"><b>Son:</b>${esc(numeroALetras(c.total, COTIZACION_EXPORT.MONEDA_NOMBRE))}</div>
+  ${bloqueSello(c.estado)}
 
-  <section class="firmas">
-    ${bloqueSello(c.estado)}
-    <div class="firma">
-      <div class="linea"></div>
-      <span>Aceptado por el cliente</span>
-    </div>
-    <div class="firma">
-      <div class="linea"></div>
-      <span>${esc(razonSocial)}</span>
-    </div>
+  <p class="condicion">${esc(COTIZACION_EXPORT.ETIQUETA_VALIDEZ)}: ${esc(COTIZACION_EXPORT.DIAS_VALIDEZ)} d&iacute;as &nbsp;·&nbsp; ${esc(origenTexto)} &nbsp;·&nbsp; ${esc(estadoTexto)}</p>
+
+  <div class="vendedor">
+    <b>Vendedor:</b>
+    ${esc(usuario?.nombres || '')}
+  </div>
+
+  <section class="condiciones">
+    <h2>Condiciones comerciales</h2>
+    <ol>${COTIZACION_EXPORT.CONDICIONES.map((texto) => `<li>${esc(texto)}</li>`).join('')}</ol>
   </section>
 
   <footer class="pie">
-    <div class="pie-logo"><img src="${esc(logo)}" alt=""></div>
-    <div>
-      <strong>${esc(razonSocial)}</strong><br>
-      ${contactoPie}
-    </div>
-    <div class="pie-nota">
-      ${esc(COTIZACION_EXPORT.NOTA_LEGAL)}<br>
-      Cotizaci&oacute;n N&deg; ${esc(c.numero)}
-    </div>
+    ${esc(COTIZACION_EXPORT.PIE_REPRESENTACION)}<br>
+    ${esc(COTIZACION_EXPORT.NOTA_LEGAL)}
   </footer>
 </div>
 
@@ -789,7 +603,7 @@ ${COTIZACION_EXPORT.MSG_GENERANDO}</body></html>`;
  *
  * @param {Object} cotizacion - Cotizacion web o prospecto con sus items.
  * @param {Object} [opciones]
- * @param {Object} [opciones.usuario] - Usuario que exporta ("Atendido por").
+ * @param {Object} [opciones.usuario] - Usuario que exporta ("Vendedor").
  * @returns {Promise<'ventana'|'iframe'>} donde se abrio el documento.
  */
 export async function exportarCotizacion(cotizacion, opciones = {}) {

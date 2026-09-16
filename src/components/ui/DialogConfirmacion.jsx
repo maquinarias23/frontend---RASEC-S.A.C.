@@ -1,7 +1,9 @@
 import { HiExclamation } from 'react-icons/hi';
 import { createPortal } from 'react-dom';
 
-export default function DialogConfirmacion({ abierto, titulo = '¿Estás seguro?', mensaje = 'Esta acción no se puede deshacer.', onConfirmar, onCancelar, children, tipo = 'peligro' }) {
+// `zIndex`: solo para superponer el diálogo a una capa que ya está por encima
+// de z-60 (las hojas a pantalla completa de las vistas móviles).
+export default function DialogConfirmacion({ abierto, titulo = '¿Estás seguro?', mensaje = 'Esta acción no se puede deshacer.', onConfirmar, onCancelar, children, tipo = 'peligro', zIndex }) {
   if (!abierto) return null;
 
   const colores = {
@@ -12,7 +14,7 @@ export default function DialogConfirmacion({ abierto, titulo = '¿Estás seguro?
   const c = colores[tipo] || colores.peligro;
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center" style={zIndex ? { zIndex } : undefined}>
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancelar} />
       <div className="relative bg-steel-900 rounded-xl border border-steel-700/60 shadow-steel p-6 max-w-sm w-full mx-4 animate-slide-up">
         <div className="flex flex-col items-center text-center">

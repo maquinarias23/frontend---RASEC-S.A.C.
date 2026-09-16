@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { SESION_EXPIRADA_FLAG_KEY } from '../config/constants';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+import { API_URL } from '../config/apiUrl';
 
 const api = axios.create({
   baseURL: API_URL,

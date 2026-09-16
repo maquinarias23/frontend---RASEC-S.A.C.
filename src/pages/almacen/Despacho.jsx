@@ -15,6 +15,7 @@ import {
   HiOutlineExclamation,
   HiOutlineSearch,
   HiOutlineUser,
+  HiOutlineDocumentText,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -34,8 +35,11 @@ import {
   ESTADO_TRACKING,
   ESTADO_UNIDAD,
   TIPO_ENTREGA,
+  TIPO_ENTREGA_LABEL,
   ORIGEN_INGRESO,
   TELEFONO_INPUT,
+  DNI_RUC_INPUT,
+  ESTADO_COMPROBANTE_LABEL,
 } from '../../config/constants';
 
 // ---------------------------------------------------------------------------
@@ -59,13 +63,18 @@ const columnas = [
   { key: 'id', label: 'N° Venta' },
   { key: 'cliente', label: 'Cliente', render: (f) => f.tbl_clientes?.nombre || '-' },
   {
-    key: 'tipo_entrega', label: 'Tipo Entrega', render: (f) => (
-      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-        f.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-600'
-      }`}>
-        {f.tipo_entrega?.replace(/_/g, ' ')}
-      </span>
-    ),
+    key: 'tipo_entrega', label: 'Tipo Entrega', render: (f) => {
+      const color = f.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA
+        ? 'bg-blue-100 text-blue-700'
+        : f.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA
+          ? 'bg-amber-100 text-amber-700'
+          : 'bg-emerald-100 text-emerald-600';
+      return (
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>
+          {TIPO_ENTREGA_LABEL[f.tipo_entrega] || f.tipo_entrega?.replace(/_/g, ' ')}
+        </span>
+      );
+    },
   },
   { key: 'estado_tracking', label: 'Tracking', render: (f) => <EstadoBadge estado={f.estado_tracking} /> },
   {
@@ -249,12 +258,22 @@ export default function Despacho() {
   const procesandoRef = useRef(false);
   const SCANNER_ID = 'rotulo-barcode-reader';
 
+  // Contra-entrega: despacho con motorizado externo + guía de remisión.
+  // Los datos del conductor y el vehículo son obligatorios para SUNAT en el
+  // transporte privado; sin ellos la guía se rechaza.
+  const MOTORIZADO_VACIO = { nombres: '', documento: '', licencia: '', telefono: '', placa: '', marca: '', modelo: '' };
+  const [modalContraEntrega, setModalContraEntrega] = useState(false);
+  const [ventaContraEntrega, setVentaContraEntrega] = useState(null);
+  const [motorizado, setMotorizado] = useState(MOTORIZADO_VACIO);
+  const [datosTraslado, setDatosTraslado] = useState({ peso_total: '', numero_bultos: '1', observaciones: '' });
+  const [despachando, setDespachando] = useState(false);
+  const [guiaEmitida, setGuiaEmitida] = useState(null);
+
   // Retiro en tienda
   const [modalRetiro, setModalRetiro] = useState(false);
   const [ventaRetiro, setVentaRetiro] = useState(null);
   const [archivoRetiro, setArchivoRetiro] = useState(null);
   const [previewRetiro, setPreviewRetiro] = useState(null);
-  const [costoPariRetiro, setCostoPariRetiro] = useState('');
   const [enviandoRetiro, setEnviandoRetiro] = useState(false);
 
   // R1: Asignar unidades
@@ -410,9 +429,13 @@ export default function Despacho() {
       await listar();
     } catch (err) {
       const respData = err.response?.data;
-      if (respData?.tipo === TIPO_ENTREGA.RETIRO_EN_TIENDA) {
+      // El rótulo escaneado puede pertenecer a una venta que no va por agencia
+      // (retiro en tienda o contra-entrega). En ambos casos no es un error del
+      // escaneo sino un pedido que se despacha por otra vía, y se explica cuál.
+      if (respData?.tipo === TIPO_ENTREGA.RETIRO_EN_TIENDA || respData?.tipo === TIPO_ENTREGA.CONTRA_ENTREGA) {
         setScanAlertaRetiro({
           mensaje: respData.error,
+          tipo: respData.tipo,
           ventaId: respData.venta?.id,
           cliente: respData.venta?.cliente,
         });
@@ -1088,7 +1111,6 @@ export default function Despacho() {
     setVentaRetiro(venta);
     setArchivoRetiro(null);
     setPreviewRetiro(null);
-    setCostoPariRetiro('');
     setModalRetiro(true);
   };
 
@@ -1108,7 +1130,6 @@ export default function Despacho() {
     }
     setEnviandoRetiro(true);
     const formData = new FormData();
-    formData.append('costo_parihuela', costoPariRetiro || '0');
     formData.append('foto', archivoRetiro);
     try {
       await api.post(`/almacen/${ventaRetiro.id}/confirmar-retiro-tienda`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -1117,6 +1138,57 @@ export default function Despacho() {
       await listar();
     } catch (err) { toast.error(err.response?.data?.error || 'Error al confirmar retiro'); }
     finally { setEnviandoRetiro(false); }
+  };
+
+  // =========================================================================
+  // Contra-entrega: despacho con motorizado externo
+  // =========================================================================
+
+  const abrirDespachoContraEntrega = (venta) => {
+    setVentaContraEntrega(venta);
+    setMotorizado(MOTORIZADO_VACIO);
+    setDatosTraslado({ peso_total: '', numero_bultos: '1', observaciones: '' });
+    setGuiaEmitida(null);
+    setModalContraEntrega(true);
+  };
+
+  const motorizadoCompleto = !!(
+    motorizado.nombres.trim()
+    && DNI_RUC_INPUT.toDigits(motorizado.documento).length === 8
+    && motorizado.licencia.trim()
+    && motorizado.placa.trim()
+  );
+
+  const despacharContraEntrega = async () => {
+    if (!ventaContraEntrega || despachando) return;
+    if (!motorizadoCompleto) {
+      toast.error('Complete nombre, DNI (8 dígitos), licencia y placa del motorizado');
+      return;
+    }
+    setDespachando(true);
+    try {
+      const { data } = await api.post(`/almacen/${ventaContraEntrega.id}/despachar-contra-entrega`, {
+        motorizado: {
+          nombres: motorizado.nombres.trim(),
+          documento: DNI_RUC_INPUT.toDigits(motorizado.documento),
+          licencia: motorizado.licencia.trim(),
+          telefono: TELEFONO_INPUT.toDigits(motorizado.telefono),
+          placa: motorizado.placa.trim(),
+          marca: motorizado.marca.trim(),
+          modelo: motorizado.modelo.trim(),
+        },
+        peso_total: datosTraslado.peso_total || undefined,
+        numero_bultos: datosTraslado.numero_bultos || undefined,
+        observaciones: datosTraslado.observaciones || undefined,
+      });
+      setGuiaEmitida(data.guia);
+      toast.success(data.mensaje);
+      await listar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al despachar el pedido');
+    } finally {
+      setDespachando(false);
+    }
   };
 
   // =========================================================================
@@ -1169,6 +1241,7 @@ export default function Despacho() {
             const cobertura = calcularCobertura(fila);
             const incompleta = !cobertura.completa;
             const empaquetado = todoEmpaquetado(fila);
+            const esContraEntrega = fila.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA;
             const tooltipIncompleta = incompleta ? `Venta incompleta. Faltan: ${formatearFaltantesCorto(cobertura)}` : '';
             return (
             <div className="flex gap-1 flex-wrap">
@@ -1187,11 +1260,15 @@ export default function Despacho() {
                   <HiOutlineClipboardCheck className="w-3.5 h-3.5" /> Empaque
                 </button>
               )}
-              <button onClick={() => abrirGenerarRotulo(fila)}
-                className="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded hover:bg-purple-200 flex items-center gap-1"
-                title={incompleta ? `${tooltipIncompleta} — el chofer completa en viaje` : 'Generar rótulo'}>
-                <HiOutlineTag className="w-3.5 h-3.5" /> Rótulo
-              </button>
+              {/* La contra-entrega no genera rótulo: no pasa por una agencia.
+                  Su documento es la guía de remisión, que se emite al despachar. */}
+              {!esContraEntrega && (
+                <button onClick={() => abrirGenerarRotulo(fila)}
+                  className="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded hover:bg-purple-200 flex items-center gap-1"
+                  title={incompleta ? `${tooltipIncompleta} — el chofer completa en viaje` : 'Generar rótulo'}>
+                  <HiOutlineTag className="w-3.5 h-3.5" /> Rótulo
+                </button>
+              )}
               {fila.estado_tracking !== ESTADO_TRACKING.EN_RUTA_A_AGENCIA && fila.estado_tracking !== ESTADO_TRACKING.DEJADO_EN_AGENCIA && (
                 <button onClick={() => abrirSubirFoto(fila)}
                   className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200 flex items-center gap-1"
@@ -1204,6 +1281,15 @@ export default function Despacho() {
                   className="text-xs bg-cyan-100 text-cyan-700 px-2 py-1 rounded hover:bg-cyan-200 flex items-center gap-1 font-medium"
                   title={incompleta ? `${tooltipIncompleta} — el chofer completará en viaje` : 'Escanear rótulo y enviar a chofer'}>
                   <HiOutlineTruck className="w-3.5 h-3.5" /> Enviar
+                </button>
+              )}
+              {/* Contra-entrega: el motorizado se lleva el pedido. La entrega se
+                  autoriza después, desde Contra-entregas, contra el cobro. */}
+              {esContraEntrega && fila.estado_tracking !== ESTADO_TRACKING.EN_RUTA_A_AGENCIA && fila.estado_tracking !== ESTADO_TRACKING.DEJADO_EN_AGENCIA && (
+                <button onClick={() => abrirDespachoContraEntrega(fila)}
+                  className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 flex items-center gap-1 font-medium"
+                  title={incompleta ? `${tooltipIncompleta} — la guía de remisión exige el pedido completo` : 'Entregar al motorizado y emitir guía de remisión'}>
+                  <HiOutlineTruck className="w-3.5 h-3.5" /> Despachar
                 </button>
               )}
               {fila.tipo_entrega === TIPO_ENTREGA.RETIRO_EN_TIENDA && (fila.estado_tracking === ESTADO_TRACKING.ALMACEN || fila.estado_tracking === ESTADO_TRACKING.EN_RUTA_A_AGENCIA) && (
@@ -1541,9 +1627,15 @@ export default function Despacho() {
                   <HiOutlineShoppingBag className="w-6 h-6 text-amber-600" />
                 </div>
                 <div>
-                  <p className="text-base font-bold text-amber-600">Recojo en Tienda</p>
+                  <p className="text-base font-bold text-amber-600">
+                    {scanAlertaRetiro.tipo === TIPO_ENTREGA.CONTRA_ENTREGA ? 'Pedido a contra-entrega' : 'Recojo en Tienda'}
+                  </p>
                   <p className="text-steel-300 text-sm mt-1">
-                    Este pedido <strong>no se envía por agencia</strong>. El cliente lo recoge directamente en tienda.
+                    {scanAlertaRetiro.tipo === TIPO_ENTREGA.CONTRA_ENTREGA ? (
+                      <>Este pedido <strong>no se envía por agencia</strong>. Sale con un motorizado externo: use el botón <strong>Despachar</strong> de la bandeja.</>
+                    ) : (
+                      <>Este pedido <strong>no se envía por agencia</strong>. El cliente lo recoge directamente en tienda.</>
+                    )}
                   </p>
                 </div>
               </div>
@@ -1569,19 +1661,6 @@ export default function Despacho() {
       {/* Modal Retiro en Tienda */}
       <Modal abierto={modalRetiro} cerrar={() => setModalRetiro(false)} titulo={`Retiro en Tienda - Venta #${ventaRetiro?.id || ''}`}>
         <form onSubmit={confirmarRetiroTienda} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-steel-200 mb-1">Costo de parihuela (S/)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              className="input-field w-full"
-              placeholder="0.00"
-              value={costoPariRetiro}
-              onChange={(e) => setCostoPariRetiro(e.target.value)}
-            />
-            <p className="text-xs text-steel-500 mt-1">Ingrese el costo de parihuela si aplica</p>
-          </div>
           <div>
             <label className="block text-sm font-medium text-steel-200 mb-1">Foto de entrega</label>
             <input type="file" className="input-field" onChange={handleFotoRetiro} accept="image/*" />
@@ -1893,6 +1972,180 @@ window.onload=function(){setTimeout(function(){window.print()},400)};
             </button>
             </div>
             </>
+          )}
+        </div>
+      </Modal>
+
+      {/* ================================================================= */}
+      {/* MODAL DESPACHO CONTRA-ENTREGA                                     */}
+      {/* ================================================================= */}
+      <Modal
+        abierto={modalContraEntrega}
+        cerrar={() => setModalContraEntrega(false)}
+        titulo={`Despachar a contra-entrega — Venta #${ventaContraEntrega?.id || ''}`}
+        ancho="max-w-2xl"
+      >
+        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+          {!guiaEmitida ? (
+            <>
+              {/* Recordatorio de que la salida no cierra el cobro */}
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3">
+                <p className="text-sm font-medium text-amber-700">El pedido sale sin que el cobro esté cerrado</p>
+                <p className="text-xs text-amber-600 mt-1">
+                  El cliente abona el total al recibirlo. Cuando el pago quede registrado y aprobado,
+                  esta venta aparecerá en <strong>Contra-entregas</strong> para que usted autorice la entrega.
+                </p>
+                {ventaContraEntrega && (
+                  <p className="text-xs text-amber-700 mt-2">
+                    Saldo por cobrar: <strong>{formatearMoneda(ventaContraEntrega.saldo_pendiente)}</strong>
+                    {' de '}{formatearMoneda(ventaContraEntrega.total)}
+                  </p>
+                )}
+              </div>
+
+              {/* Destino de la entrega */}
+              <div className="bg-steel-900/40 border border-steel-700/50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-steel-300 uppercase tracking-wider mb-1.5">Destino</p>
+                <p className="text-sm text-steel-100">{ventaContraEntrega?.direccion_manual || 'Sin dirección registrada'}</p>
+                <p className="text-xs text-steel-400 mt-0.5">
+                  {[ventaContraEntrega?.tbl_distritos?.nombre, ventaContraEntrega?.tbl_provincias?.nombre, ventaContraEntrega?.tbl_departamentos?.nombre]
+                    .filter(Boolean).join(' / ') || '—'}
+                </p>
+              </div>
+
+              {/* Datos del motorizado: SUNAT los exige en la guía */}
+              <div>
+                <p className="text-xs font-semibold text-steel-300 uppercase tracking-wider mb-2">
+                  Motorizado (conductor externo)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Nombre completo *</label>
+                    <input className="input-field text-sm" value={motorizado.nombres}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, nombres: e.target.value }))}
+                      placeholder="Nombres y apellidos" maxLength={200} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">DNI *</label>
+                    <input className="input-field text-sm" value={motorizado.documento}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, documento: DNI_RUC_INPUT.toDigits(e.target.value) }))}
+                      placeholder="8 dígitos" maxLength={8} inputMode="numeric" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Licencia de conducir *</label>
+                    <input className="input-field text-sm" value={motorizado.licencia}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, licencia: e.target.value.toUpperCase() }))}
+                      placeholder="Q41784439" maxLength={20} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Teléfono</label>
+                    <input className="input-field text-sm" value={motorizado.telefono}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, telefono: TELEFONO_INPUT.format(e.target.value) }))}
+                      placeholder="999 999 999" maxLength={TELEFONO_INPUT.MAX_LENGTH} inputMode="numeric" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-steel-500 mt-1.5">
+                  SUNAT exige DNI, nombre y licencia del conductor en la guía de remisión.
+                </p>
+              </div>
+
+              {/* Vehículo */}
+              <div>
+                <p className="text-xs font-semibold text-steel-300 uppercase tracking-wider mb-2">Vehículo</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Placa *</label>
+                    <input className="input-field text-sm" value={motorizado.placa}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, placa: e.target.value.toUpperCase() }))}
+                      placeholder="A1Y-298" maxLength={20} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Marca</label>
+                    <input className="input-field text-sm" value={motorizado.marca}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, marca: e.target.value }))}
+                      placeholder="Honda" maxLength={50} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Modelo</label>
+                    <input className="input-field text-sm" value={motorizado.modelo}
+                      onChange={(e) => setMotorizado((m) => ({ ...m, modelo: e.target.value }))}
+                      placeholder="CB 125" maxLength={50} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Traslado */}
+              <div>
+                <p className="text-xs font-semibold text-steel-300 uppercase tracking-wider mb-2">Traslado</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Peso total (kg)</label>
+                    <input type="number" min="0" step="0.001" className="input-field text-sm"
+                      value={datosTraslado.peso_total}
+                      onChange={(e) => setDatosTraslado((d) => ({ ...d, peso_total: e.target.value }))}
+                      placeholder="1" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">N° de bultos</label>
+                    <input type="number" min="1" step="1" className="input-field text-sm"
+                      value={datosTraslado.numero_bultos}
+                      onChange={(e) => setDatosTraslado((d) => ({ ...d, numero_bultos: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-steel-500 block mb-1">Observaciones</label>
+                    <input className="input-field text-sm" value={datosTraslado.observaciones}
+                      onChange={(e) => setDatosTraslado((d) => ({ ...d, observaciones: e.target.value }))}
+                      placeholder="Opcional" maxLength={500} />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={despacharContraEntrega}
+                disabled={!motorizadoCompleto || despachando}
+                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <HiOutlineTruck className="w-4 h-4" />
+                {despachando ? 'Despachando y emitiendo guía...' : 'Despachar y emitir guía de remisión'}
+              </button>
+            </>
+          ) : (
+            /* Resultado: la guía quedó emitida (o con error, sin revertir el despacho) */
+            <div className="space-y-3">
+              <div className={`rounded-lg border p-3 ${
+                guiaEmitida.estado === 'error' || guiaEmitida.estado === 'rechazado_sunat'
+                  ? 'bg-red-50 border-red-300'
+                  : 'bg-emerald-50 border-emerald-300'
+              }`}>
+                <p className={`text-sm font-semibold ${
+                  guiaEmitida.estado === 'error' || guiaEmitida.estado === 'rechazado_sunat' ? 'text-red-700' : 'text-emerald-700'
+                }`}>
+                  Pedido despachado — Guía {guiaEmitida.serie}-{String(guiaEmitida.numero).padStart(8, '0')}
+                </p>
+                <p className="text-xs text-steel-600 mt-1">
+                  Estado en SUNAT: <strong>{ESTADO_COMPROBANTE_LABEL[guiaEmitida.estado] || guiaEmitida.estado}</strong>
+                </p>
+                {guiaEmitida.sunat_descripcion && (
+                  <p className="text-xs text-steel-600 mt-1">{guiaEmitida.sunat_descripcion}</p>
+                )}
+                {(guiaEmitida.estado === 'error' || guiaEmitida.estado === 'rechazado_sunat') && (
+                  <p className="text-xs text-red-600 mt-2">
+                    La mercadería ya salió; la guía quedó registrada y puede reintentarse desde Contra-entregas.
+                  </p>
+                )}
+              </div>
+
+              {guiaEmitida.pdf_url && (
+                <a href={guiaEmitida.pdf_url} target="_blank" rel="noopener noreferrer"
+                  className="btn-primary w-full flex items-center justify-center gap-2">
+                  <HiOutlineDocumentText className="w-4 h-4" /> Ver / imprimir guía de remisión
+                </a>
+              )}
+
+              <button onClick={() => setModalContraEntrega(false)} className="btn-secondary w-full">
+                Cerrar
+              </button>
+            </div>
           )}
         </div>
       </Modal>

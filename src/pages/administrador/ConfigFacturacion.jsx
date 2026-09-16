@@ -3,6 +3,7 @@ import { configFacturacionService } from '../../services/comprobantesService';
 import {
   TIPO_COMPROBANTE, TIPO_COMPROBANTE_LABEL, FORMATO_PDF, MONEDA, TIPO_IGV,
   COMPROBANTE_NUMERO, TELEFONO_INPUT, SERIE_COMPROBANTE, PROVEEDOR_CPE,
+  UBIGEO, EMAIL_INPUT,
 } from '../../config/constants';
 import toast from 'react-hot-toast';
 import {
@@ -23,6 +24,8 @@ const FORM_INICIAL = {
   razon_social_emisor: '',
   direccion_emisor: '',
   telefono_emisor: '',
+  ubigeo_emisor: '',
+  email_emisor: '',
   formato_pdf: FORMATO_PDF.A4,
   moneda_defecto: MONEDA.PEN,
   igv_tipo_defecto: TIPO_IGV.GRAVADO,
@@ -57,6 +60,8 @@ export default function ConfigFacturacion() {
         razon_social_emisor: configRes.data.razon_social_emisor || '',
         direccion_emisor: configRes.data.direccion_emisor || '',
         telefono_emisor: TELEFONO_INPUT.format(configRes.data.telefono_emisor),
+        ubigeo_emisor: configRes.data.ubigeo_emisor || '',
+        email_emisor: configRes.data.email_emisor || '',
         formato_pdf: configRes.data.formato_pdf || FORMATO_PDF.A4,
         moneda_defecto: configRes.data.moneda_defecto || MONEDA.PEN,
         igv_tipo_defecto: configRes.data.igv_tipo_defecto || TIPO_IGV.GRAVADO,
@@ -73,6 +78,16 @@ export default function ConfigFacturacion() {
     // de despacho lo imprime como contacto del remitente.
     if (form.telefono_emisor && !TELEFONO_INPUT.esValido(form.telefono_emisor)) {
       toast.error(TELEFONO_INPUT.MSG_INVALIDO);
+      return;
+    }
+    // El ubigeo solo lo exige la guía de remisión, pero si se carga tiene que
+    // ser el código completo: con 5 dígitos SUNAT rechaza el documento.
+    if (form.ubigeo_emisor && form.ubigeo_emisor.length !== UBIGEO.LONGITUD) {
+      toast.error(UBIGEO.MSG_INVALIDO);
+      return;
+    }
+    if (form.email_emisor && !EMAIL_INPUT.REGEX.test(form.email_emisor.trim())) {
+      toast.error(EMAIL_INPUT.MSG_INVALIDO);
       return;
     }
     setSaving(true);
@@ -397,6 +412,26 @@ export default function ConfigFacturacion() {
                 onChange={e => setForm(prev => ({ ...prev, telefono_emisor: TELEFONO_INPUT.format(e.target.value) }))}
                 placeholder={TELEFONO_INPUT.PLACEHOLDER} />
               <p className="text-[10px] text-steel-400">Se imprime como remitente en los rótulos de despacho.</p>
+            </div>
+            {/* Ubigeo y correo: solo los exige la guía de remisión electrónica
+                (punto de partida del traslado y datos del emisor). Sin el
+                ubigeo no se puede despachar una contra-entrega. */}
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Ubigeo del almacén de partida</label>
+              <input type="text" className="input-field font-mono tracking-wider" maxLength={UBIGEO.LONGITUD}
+                inputMode="numeric" value={form.ubigeo_emisor}
+                onChange={e => setForm(prev => ({ ...prev, ubigeo_emisor: e.target.value.replace(/\D/g, '') }))}
+                placeholder="150101" />
+              <p className="text-[10px] text-steel-400">
+                Código de 6 dígitos del distrito (SUNAT). Obligatorio para emitir guías de remisión.
+              </p>
+            </div>
+            <div className="col-span-2 space-y-1">
+              <label className="text-xs font-semibold text-steel-300 tracking-wide uppercase">Correo del emisor</label>
+              <input type="email" className="input-field" value={form.email_emisor}
+                onChange={e => setForm(prev => ({ ...prev, email_emisor: e.target.value }))}
+                placeholder="facturacion@empresa.com" maxLength={EMAIL_INPUT.MAX_LENGTH} />
+              <p className="text-[10px] text-steel-400">Se declara en los datos del emisor de la guía de remisión.</p>
             </div>
           </div>
         </div>

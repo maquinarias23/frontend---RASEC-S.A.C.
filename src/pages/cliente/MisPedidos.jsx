@@ -9,7 +9,7 @@ import EstadoBadge from '../../components/ui/EstadoBadge';
 import TimelineTracking from '../../components/ui/TimelineTracking';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import { buildMediaUrl } from '../../utils/media';
-import { ESTADO_VENTA, ESTADO_TRACKING, TIPO_ENTREGA, METODOS_PAGO, METODOS_PAGO_LABEL, TELEFONO_INPUT, MSG_PAGO_BLOQUEADO_CLIENTE } from '../../config/constants';
+import { ESTADO_VENTA, ESTADO_TRACKING, TIPO_ENTREGA, METODOS_PAGO, METODOS_PAGO_LABEL, TELEFONO_INPUT, MSG_PAGO_BLOQUEADO_CLIENTE, pasosTrackingPara } from '../../config/constants';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 
@@ -191,7 +191,7 @@ export default function MisPedidos() {
             {/* Timeline */}
             <div className="bg-steel-900/30 rounded-lg p-4 border border-steel-700/20">
               <h3 className="text-sm font-semibold text-steel-200 mb-4 tracking-wide">Estado del envio</h3>
-              <TimelineTracking estadoActual={detalle.estado_tracking} historial={detalle.historial_tracking || []} />
+              <TimelineTracking estadoActual={detalle.estado_tracking} pasos={pasosTrackingPara(detalle.tipo_entrega)} historial={detalle.historial_tracking || []} />
             </div>
 
             {/* Evidencia del envio */}

@@ -4,7 +4,7 @@ import {
   HiOutlineEye, HiOutlineXCircle, HiOutlineCheckCircle,
   HiOutlinePhotograph, HiOutlineDownload, HiOutlineX,
   HiOutlineClipboardList, HiOutlineShoppingCart, HiOutlineCash,
-  HiOutlineBan, HiOutlineGift,
+  HiOutlineBan, HiOutlineGift, HiOutlineDocumentDownload,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -16,6 +16,7 @@ import Tabs from '../../components/ui/Tabs';
 import ListaComprobantesVenta from '../../components/shared/ListaComprobantesVenta';
 import TotalizadorVenta from '../../components/shared/TotalizadorVenta';
 import TarjetaResumen from '../../components/ui/TarjetaResumen';
+import { exportarVentasExcel } from '../../utils/exportarVentas';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import { buildMediaUrl } from '../../utils/media';
 import { ESTADO_VENTA, TIPO_ENTREGA } from '../../config/constants';
@@ -110,6 +111,7 @@ export default function Ventas() {
   const [rechazoVenta, setRechazoVenta] = useState(null);
   const [ajustesDetalle, setAjustesDetalle] = useState([]);
   const [motivoRechazoVenta, setMotivoRechazoVenta] = useState('');
+  const [aprobandoSinAdelanto, setAprobandoSinAdelanto] = useState(false);
 
   // Contadores
   const contadores = useMemo(() => {
@@ -172,6 +174,24 @@ export default function Ventas() {
     setMotivoCancelacion('');
   };
 
+  // Activa una contra-entrega sin exigir adelanto. El cobro no se pierde:
+  // almacén no podrá autorizar la entrega hasta que el saldo llegue a cero.
+  const aprobarSinAdelanto = async () => {
+    if (!detalle || aprobandoSinAdelanto) return;
+    setAprobandoSinAdelanto(true);
+    try {
+      const { data: res } = await api.post(`/ventas/${detalle.id}/aprobar-sin-adelanto`);
+      toast.success(res.mensaje || 'Salida autorizada sin adelanto');
+      const { data } = await api.get(`/ventas/${detalle.id}`);
+      setDetalle(data);
+      listar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al autorizar la salida');
+    } finally {
+      setAprobandoSinAdelanto(false);
+    }
+  };
+
   const tabs = [
     { key: 'pendientes', label: 'Pendientes', contador: contadores.pendientes },
     { key: 'vouchers_pendientes', label: 'Vouchers pendientes', contador: contadores.vouchers_pendientes },
@@ -182,9 +202,36 @@ export default function Ventas() {
     { key: 'canceladas', label: 'Canceladas', contador: contadores.canceladas },
   ];
 
+  // Se exporta el tab completo, no solo la página visible: quien descarga el
+  // Excel espera todas las ventas de la pestaña, no las 20 que ve en pantalla.
+  const exportar = () => {
+    if (datosFiltrados.length === 0) {
+      toast.error('No hay ventas para exportar en esta pestaña');
+      return;
+    }
+    try {
+      const etiqueta = tabs.find((t) => t.key === tabActual)?.label || '';
+      const r = exportarVentasExcel(datosFiltrados, { filtrosTexto: etiqueta });
+      toast.success(`Excel descargado: ${r.ventas} ventas, ${r.productos} productos, ${r.pagos} pagos`);
+    } catch (err) {
+      console.error('Error al exportar ventas:', err);
+      toast.error('No se pudo generar el Excel');
+    }
+  };
+
   return (
     <div>
-      <h1 className="text-2xl font-bold font-display tracking-wider text-steel-100 mb-6">Gestión de Ventas</h1>
+      <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
+        <h1 className="text-2xl font-bold font-display tracking-wider text-steel-100">Gestión de Ventas</h1>
+        <button
+          onClick={exportar}
+          disabled={cargando || !datosFiltrados.length}
+          className="flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          title="Descargar en Excel las ventas de la pestaña actual"
+        >
+          <HiOutlineDocumentDownload className="w-4 h-4" /> Exportar Excel
+        </button>
+      </div>
 
       {/* Tarjetas resumen */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -423,13 +470,46 @@ export default function Ventas() {
 
             {/* Botones */}
             {detalle.estado_venta === ESTADO_VENTA.PENDIENTE_APROBACION && (
-              <div className="flex gap-3 pt-2">
-                <div className="flex-1 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-center">
-                  <p className="text-amber-600 text-sm font-medium">La venta se activará automáticamente al aprobar el voucher de pago</p>
+              <div className="space-y-3 pt-2">
+                {/* Contra-entrega: el cliente paga al recibir, así que puede no
+                    haber voucher que aprobar. La salida se autoriza aquí, de
+                    forma explícita, y queda registrado quién la autorizó. */}
+                {detalle.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                    <p className="text-amber-600 text-sm font-medium">Venta a contra-entrega</p>
+                    <p className="text-steel-300 text-xs mt-1">
+                      El cliente paga {formatearMoneda(detalle.total)} al recibir el pedido. Puedes autorizar
+                      la salida del almacén sin adelanto: el motorizado entregará solo cuando el abono esté
+                      registrado y aprobado.
+                    </p>
+                    <button
+                      onClick={aprobarSinAdelanto}
+                      disabled={aprobandoSinAdelanto}
+                      className="mt-3 px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <HiOutlineCheckCircle className="w-5 h-5" />
+                      {aprobandoSinAdelanto ? 'Autorizando...' : 'Autorizar salida sin adelanto'}
+                    </button>
+                  </div>
+                )}
+                <div className="flex gap-3">
+                  <div className="flex-1 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-center">
+                    <p className="text-amber-600 text-sm font-medium">La venta se activará automáticamente al aprobar el voucher de pago</p>
+                  </div>
+                  <button onClick={() => { setRechazoVenta(detalle.id); setMotivoRechazoVenta(''); }} className="px-4 py-2 bg-red-500/15 text-red-600 border border-red-500/30 rounded-lg hover:bg-red-500/25 transition-colors flex items-center gap-2">
+                    <HiOutlineXCircle className="w-5 h-5" /> Rechazar
+                  </button>
                 </div>
-                <button onClick={() => { setRechazoVenta(detalle.id); setMotivoRechazoVenta(''); }} className="px-4 py-2 bg-red-500/15 text-red-600 border border-red-500/30 rounded-lg hover:bg-red-500/25 transition-colors flex items-center gap-2">
-                  <HiOutlineXCircle className="w-5 h-5" /> Rechazar
-                </button>
+              </div>
+            )}
+
+            {/* Rastro de quién autorizó despachar sin haber cobrado nada. */}
+            {detalle.aprobada_sin_adelanto && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+                <span className="text-amber-600 text-xs font-semibold block mb-1">Salida autorizada sin adelanto</span>
+                <p className="text-steel-200 text-sm">
+                  {detalle.tbl_aprobador_sin_adelanto?.nombres || 'Usuario'} — {formatearFechaHora(detalle.fecha_aprobacion_sin_adelanto)}
+                </p>
               </div>
             )}
 

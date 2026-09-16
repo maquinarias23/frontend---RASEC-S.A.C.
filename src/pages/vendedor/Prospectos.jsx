@@ -32,6 +32,11 @@ import {
   ESTADO_PROSPECTO,
   ESTADO_UNIDAD,
   TIPO_ENTREGA,
+  TIPO_ENTREGA_LABEL,
+  TIPOS_ENTREGA_CON_DESTINO,
+  filtrarDepartamentosContraEntrega,
+  filtrarProvinciasContraEntrega,
+  MSG_CONTRA_ENTREGA_ZONA,
   TIPO_DESTINO,
   TIPO_PRECIO,
   TIPO_PROMOCION,
@@ -329,6 +334,9 @@ export default function Prospectos() {
   const [clientePuntos, setClientePuntos] = useState(0);
   const [itemsVenta, setItemsVenta] = useState([]);
   const [tipoEntrega, setTipoEntrega] = useState(TIPO_ENTREGA.ENVIO_POR_AGENCIA);
+  // Direccion exacta de entrega: obligatoria en contra-entrega (punto de
+  // llegada del motorizado y de la guia de remision).
+  const [direccionEntrega, setDireccionEntrega] = useState('');
   const [transportistaId, setTransportistaId] = useState('');
   const [transportistas, setTransportistas] = useState([]);
   const [tipoDestino, setTipoDestino] = useState(TIPO_DESTINO.LIMA);
@@ -711,6 +719,7 @@ export default function Prospectos() {
     setClientePuntos(0);
     setItemsVenta([]);
     setTipoEntrega(TIPO_ENTREGA.ENVIO_POR_AGENCIA);
+    setDireccionEntrega('');
     setTransportistaId('');
     setTipoDestino(TIPO_DESTINO.LIMA);
     setDepartamentoId('');
@@ -825,13 +834,32 @@ export default function Prospectos() {
     return lima ? String(lima.id) : '';
   }, [departamentos]);
 
+  const esContraEntrega = tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA;
+
   const departamentosFiltrados = useMemo(() => {
+    // La zona del motorizado (Lima Metropolitana + Callao) manda sobre el
+    // filtro por tipo de destino: en contra-entrega no hay "provincia".
+    if (esContraEntrega) return filtrarDepartamentosContraEntrega(departamentos);
     if (!limaDeptoId) return departamentos;
     if (tipoDestino === TIPO_DESTINO.LIMA) {
       return departamentos.filter((d) => String(d.id) === limaDeptoId);
     }
     return departamentos.filter((d) => String(d.id) !== limaDeptoId);
-  }, [departamentos, tipoDestino, limaDeptoId]);
+  }, [departamentos, tipoDestino, limaDeptoId, esContraEntrega]);
+
+  const provinciasFiltradas = useMemo(
+    () => (esContraEntrega ? filtrarProvinciasContraEntrega(provincias) : provincias),
+    [provincias, esContraEntrega],
+  );
+
+  // Contra-entrega: Lima y Callao tienen una sola provincia válida cada uno,
+  // así que se elige sola y el vendedor solo toca el distrito.
+  useEffect(() => {
+    if (!modalConvertir || !esContraEntrega) return;
+    if (provinciasFiltradas.length !== 1) return;
+    const unica = String(provinciasFiltradas[0].id);
+    if (String(provinciaId) !== unica) handleProvinciaChangeProspecto(unica);
+  }, [esContraEntrega, provinciasFiltradas, provinciaId, modalConvertir]);
 
   useEffect(() => {
     if (!modalConvertir) return;
@@ -946,10 +974,20 @@ export default function Prospectos() {
     }
     if (descuentoPuntos > clientePuntos) return toast.error('No tienes suficientes puntos');
 
-    if (tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA) {
-      if (!transportistaId) return toast.error('Selecciona la agencia transportista');
+    if (tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && !transportistaId) {
+      return toast.error('Selecciona la agencia transportista');
+    }
+    if (TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega)) {
       if (!departamentoId || !provinciaId || !distritoId) {
         return toast.error('Selecciona departamento, provincia y distrito');
+      }
+      if (tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA) {
+        if (!direccionEntrega.trim()) {
+          return toast.error('Indica la dirección exacta donde el motorizado hará la entrega');
+        }
+        if (!provinciasFiltradas.some((p) => String(p.id) === String(provinciaId))) {
+          return toast.error(MSG_CONTRA_ENTREGA_ZONA);
+        }
       }
     }
 
@@ -960,9 +998,10 @@ export default function Prospectos() {
         tipo_entrega: tipoEntrega,
         tipo_destino: tipoDestino,
         transportista_id: tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA ? parseInt(transportistaId) : null,
-        departamento_id: tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA ? parseInt(departamentoId) : null,
-        provincia_id: tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA ? parseInt(provinciaId) : null,
-        distrito_id: tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA ? parseInt(distritoId) : null,
+        departamento_id: TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega) ? parseInt(departamentoId) : null,
+        provincia_id: TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega) ? parseInt(provinciaId) : null,
+        distrito_id: TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega) ? parseInt(distritoId) : null,
+        direccion_manual: tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA ? direccionEntrega.trim() : null,
         items: itemsVenta.map((i) => ({
           product_id: i.product_id,
           cantidad: parseInt(i.cantidad) || 1,
@@ -1804,33 +1843,41 @@ export default function Prospectos() {
                     setDistritoId('');
                     setProvincias([]);
                     setDistritos([]);
+                    setDireccionEntrega('');
                   }}>
-                  <option value={TIPO_ENTREGA.ENVIO_POR_AGENCIA}>Envío por Agencia</option>
-                  <option value={TIPO_ENTREGA.RETIRO_EN_TIENDA}>Retiro en tienda</option>
+                  <option value={TIPO_ENTREGA.ENVIO_POR_AGENCIA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.ENVIO_POR_AGENCIA]}</option>
+                  <option value={TIPO_ENTREGA.RETIRO_EN_TIENDA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.RETIRO_EN_TIENDA]}</option>
+                  <option value={TIPO_ENTREGA.CONTRA_ENTREGA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.CONTRA_ENTREGA]}</option>
                 </select>
               </div>
               <div>
                 <label className="label-field">Destino</label>
-                <select className="input-field" value={tipoDestino}
-                  onChange={(e) => setTipoDestino(e.target.value)}>
+                <select className="input-field disabled:opacity-60 disabled:cursor-not-allowed"
+                  value={esContraEntrega ? TIPO_DESTINO.LIMA : tipoDestino}
+                  onChange={(e) => setTipoDestino(e.target.value)}
+                  disabled={esContraEntrega}
+                  title={esContraEntrega ? 'La contra-entrega solo llega a Lima y Callao' : undefined}>
                   <option value={TIPO_DESTINO.LIMA}>Lima</option>
-                  <option value={TIPO_DESTINO.PROVINCIA}>Provincia</option>
+                  {!esContraEntrega && <option value={TIPO_DESTINO.PROVINCIA}>Provincia</option>}
                 </select>
               </div>
             </div>
 
-            {/* Envío por agencia: transportista + cascada ubigeo */}
-            {tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && (
+            {/* Destino: envío por agencia y contra-entrega. En el primero
+                alimenta el rótulo; en el segundo, la guía de remisión. */}
+            {TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega) && (
               <div className="space-y-3">
-                <div>
-                  <label className="label-field">Agencia Transportista *</label>
-                  <select className="input-field" value={transportistaId} onChange={(e) => setTransportistaId(e.target.value)} required>
-                    <option value="">Seleccionar agencia...</option>
-                    {transportistas.map((t) => (
-                      <option key={t.id} value={t.id}>{t.nombre}</option>
-                    ))}
-                  </select>
-                </div>
+                {tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && (
+                  <div>
+                    <label className="label-field">Agencia Transportista *</label>
+                    <select className="input-field" value={transportistaId} onChange={(e) => setTransportistaId(e.target.value)} required>
+                      <option value="">Seleccionar agencia...</option>
+                      {transportistas.map((t) => (
+                        <option key={t.id} value={t.id}>{t.nombre}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="label-field">Departamento *</label>
@@ -1838,8 +1885,10 @@ export default function Prospectos() {
                       className="input-field disabled:opacity-60 disabled:cursor-not-allowed"
                       value={departamentoId}
                       onChange={(e) => handleDepartamentoChangeProspecto(e.target.value)}
-                      disabled={tipoDestino === TIPO_DESTINO.LIMA}
-                      title={tipoDestino === TIPO_DESTINO.LIMA ? 'Fijado por Destino = Lima' : undefined}
+                      disabled={!esContraEntrega && tipoDestino === TIPO_DESTINO.LIMA}
+                      title={esContraEntrega
+                        ? 'Zona de reparto del motorizado'
+                        : (tipoDestino === TIPO_DESTINO.LIMA ? 'Fijado por Destino = Lima' : undefined)}
                       required>
                       <option value="">Seleccionar...</option>
                       {departamentosFiltrados.map((d) => (
@@ -1849,11 +1898,12 @@ export default function Prospectos() {
                   </div>
                   <div>
                     <label className="label-field">Provincia *</label>
-                    <select className="input-field" value={provinciaId}
+                    <select className="input-field disabled:opacity-60 disabled:cursor-not-allowed" value={provinciaId}
                       onChange={(e) => handleProvinciaChangeProspecto(e.target.value)}
-                      disabled={!departamentoId} required>
+                      disabled={!departamentoId || (esContraEntrega && provinciasFiltradas.length === 1)}
+                      title={esContraEntrega ? 'Fijada por la zona de reparto' : undefined} required>
                       <option value="">{departamentoId ? 'Seleccionar...' : 'Elija depto.'}</option>
-                      {provincias.map((p) => (
+                      {provinciasFiltradas.map((p) => (
                         <option key={p.id} value={p.id}>{p.nombre}</option>
                       ))}
                     </select>
@@ -1870,6 +1920,28 @@ export default function Prospectos() {
                     </select>
                   </div>
                 </div>
+
+                {tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA && (
+                  <>
+                    <div>
+                      <label className="label-field">Dirección de entrega *</label>
+                      <input type="text" className="input-field" value={direccionEntrega}
+                        onChange={(e) => setDireccionEntrega(e.target.value)}
+                        placeholder="Calle, número, piso/interior y referencia" maxLength={500} />
+                      <p className="text-[11px] text-steel-400 mt-1">
+                        Es a donde va el motorizado y el punto de llegada que declara la guía de remisión.
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-700">
+                      <p className="font-medium">El cliente paga al recibir el pedido</p>
+                      <p className="text-xs mt-1">
+                        Puede salir del almacén sin adelanto, con autorización de Admin o Supervisión.
+                        No genera rótulo, genera guía de remisión.
+                      </p>
+                      <p className="text-xs mt-1 font-medium">{MSG_CONTRA_ENTREGA_ZONA}</p>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

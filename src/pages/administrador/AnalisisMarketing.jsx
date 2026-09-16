@@ -19,6 +19,7 @@ import TablaGenerica from '../../components/ui/TablaGenerica';
 import Paginacion from '../../components/ui/Paginacion';
 import Modal from '../../components/ui/Modal';
 import DialogConfirmacion from '../../components/ui/DialogConfirmacion';
+import BotonesExportar from '../../components/ui/BotonesExportar';
 import {
   PLATAFORMA_MKT, PLATAFORMA_MKT_LABEL, PLATAFORMA_MKT_COLOR,
   DEFAULT_PARAMETROS_MKT, DIAS_SEMANA_ES,
@@ -706,13 +707,282 @@ export default function AnalisisMarketing() {
   ];
 
   // ═══════════════════════════════════════
+  // EXPORTACIÓN A EXCEL
+  // ═══════════════════════════════════════
+
+  const nombreCampana = (id) => campanas.find(c => String(c.id) === String(id))?.nombre || '';
+  const nombreVendedor = (id) => vendedores.find(v => String(v.id) === String(id))?.nombres || '';
+
+  const filtrosPeriodo = () => ([
+    { etiqueta: 'Desde', valor: filtros.fechaInicio },
+    { etiqueta: 'Hasta', valor: filtros.fechaFin },
+  ]);
+
+  // Los porcentajes se exportan como numero (12.34 = 12.34%) y no como texto:
+  // asi se pueden ordenar y graficar en Excel. Van con `sinTotal` porque una
+  // suma de porcentajes no significa nada.
+  const colPorcentaje = (header, calcular, ancho = 18) => ({
+    header, ancho, tipo: 'moneda', sinTotal: true,
+    valor: (f) => calcular(f) * 100,
+  });
+
+  // Registros de las metricas personalizadas del dashboard, aplanados a una
+  // fila por metrica y fecha.
+  const filasCustomDashboard = () => (resumen?.metricas_custom || []).flatMap(m =>
+    (m.registros || []).map(r => ({
+      metrica: m.nombre,
+      unidad: m.unidad || '',
+      fecha: formatearFecha(r.fecha),
+      valor: Number(r.valor) || 0,
+    }))
+  );
+
+  // Cada tab exporta exactamente lo que tiene en pantalla, con sus filtros
+  // aplicados. Se arma en el clic —no en cada render— con los datos del momento.
+  const REPORTES_EXCEL = {
+    dashboard: () => ({
+      archivo: 'Marketing_Dashboard',
+      titulo: 'Analisis de Marketing — Dashboard',
+      filtros: [
+        ...filtrosPeriodo(),
+        { etiqueta: 'Campaña', valor: filtroCampana ? nombreCampana(filtroCampana) : 'Todas' },
+      ],
+      secciones: [
+        {
+          titulo: 'Indicadores',
+          columnas: [
+            { header: 'Gasto Total', valor: (k) => Number(k.gasto_total) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Total Leads', valor: (k) => Number(k.leads_total) || 0, tipo: 'numero', ancho: 12 },
+            { header: 'Costo / Lead', valor: (k) => Number(k.costo_por_lead) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Videos', valor: (k) => Number(k.videos_total) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Contenido', valor: (k) => Number(k.contenido_total) || 0, tipo: 'numero', ancho: 12 },
+            { header: 'Gasto/Dia Prom.', valor: (k) => Number(k.gasto_promedio_diario) || 0, tipo: 'moneda', ancho: 16 },
+            { header: 'Dias con registro', valor: (k) => Number(k.dias_registrados) || 0, tipo: 'numero', ancho: 16 },
+          ],
+          filas: resumen?.kpis ? [resumen.kpis] : [],
+        },
+        {
+          titulo: 'Evolucion Diaria',
+          totales: true,
+          columnas: [
+            { header: 'Fecha', valor: (d) => formatearFecha(d.fecha), ancho: 14 },
+            { header: 'Gasto', valor: (d) => Number(d.gasto) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Leads', valor: (d) => Number(d.leads) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Videos', valor: (d) => Number(d.videos) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Contenido', valor: (d) => Number(d.contenido) || 0, tipo: 'numero', ancho: 12 },
+          ],
+          filas: resumen?.evolucion_diaria || [],
+        },
+        {
+          titulo: 'Por Campaña',
+          totales: true,
+          columnas: [
+            { header: 'Campaña', valor: 'campana', ancho: 30 },
+            { header: 'Plataforma', valor: (d) => PLATAFORMA_MKT_LABEL[d.plataforma] || d.plataforma || '', ancho: 16 },
+            { header: 'Gasto', valor: (d) => Number(d.gasto) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Leads', valor: (d) => Number(d.leads) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Videos', valor: (d) => Number(d.videos) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Contenido', valor: (d) => Number(d.contenido) || 0, tipo: 'numero', ancho: 12 },
+            // Es un ratio: se recalcula, no se suma.
+            { header: 'Costo / Lead', valor: (d) => Number(d.costo_por_lead) || 0, tipo: 'moneda', sinTotal: true, ancho: 14 },
+          ],
+          filas: resumen?.por_campana || [],
+        },
+        {
+          titulo: 'Por Plataforma',
+          totales: true,
+          columnas: [
+            { header: 'Plataforma', valor: (d) => PLATAFORMA_MKT_LABEL[d.plataforma] || d.plataforma || '', ancho: 20 },
+            { header: 'Gasto', valor: (d) => Number(d.gasto) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Leads', valor: (d) => Number(d.leads) || 0, tipo: 'numero', ancho: 10 },
+          ],
+          filas: resumen?.por_plataforma || [],
+        },
+        {
+          titulo: 'Metricas Personalizadas',
+          columnas: [
+            { header: 'Metrica', valor: 'metrica', ancho: 26 },
+            { header: 'Unidad', valor: 'unidad', ancho: 12 },
+            { header: 'Fecha', valor: 'fecha', ancho: 14 },
+            { header: 'Valor', valor: 'valor', tipo: 'moneda', ancho: 14 },
+          ],
+          filas: filasCustomDashboard(),
+        },
+      ],
+    }),
+
+    gasto_vendedor: () => ({
+      archivo: 'Marketing_Gasto_por_Vendedor',
+      titulo: 'Analisis de Marketing — Gasto por Vendedor',
+      filtros: [
+        { etiqueta: 'Vendedor', valor: filtroVendedor ? nombreVendedor(filtroVendedor) : 'Todos (consolidado)' },
+        { etiqueta: 'Periodo', valor: `${MESES[filtroMes - 1]} ${filtroAnio}` },
+        { etiqueta: 'Efect. Ventas min', valor: formatearPorcentaje(umbrales.efectividad_ventas_min) },
+        { etiqueta: 'Efect. Utilidad min', valor: formatearPorcentaje(umbrales.efectividad_utilidad_min) },
+        { etiqueta: 'Conversion min', valor: formatearPorcentaje(umbrales.tasa_conversion_min) },
+      ],
+      secciones: [
+        {
+          titulo: 'Detalle Diario',
+          totales: true,
+          columnas: [
+            { header: 'Dia', valor: (f) => DIAS_SEMANA_ES[new Date(f.fecha + 'T12:00:00').getDay()], ancho: 12 },
+            { header: 'Fecha', valor: (f) => formatearFecha(f.fecha), ancho: 14 },
+            { header: 'Gasto publicidad', valor: (f) => Number(f.gasto) || 0, tipo: 'moneda', ancho: 18 },
+            { header: 'Ventas', valor: (f) => Number(f.ventas) || 0, tipo: 'moneda', ancho: 16 },
+            { header: 'Utilidad', valor: (f) => Number(f.utilidad) || 0, tipo: 'moneda', ancho: 16 },
+            colPorcentaje('Efect. Ventas (%)', (f) => (f.ventas > 0 ? f.gasto / f.ventas : 0)),
+            colPorcentaje('Efect. Utilidad (%)', (f) => (f.utilidad > 0 ? f.gasto / f.utilidad : 0)),
+            { header: 'Clientes', valor: (f) => Number(f.clientes) || 0, tipo: 'numero', ancho: 11 },
+            { header: 'Leads', valor: (f) => Number(f.leads) || 0, tipo: 'numero', ancho: 10 },
+            colPorcentaje('Conversion (%)', (f) => (f.leads > 0 ? f.clientes / f.leads : 0), 15),
+            // Conteo del dia, no acumulable.
+            { header: 'Campañas activas', valor: (f) => Number(f.campanas_activas) || 0, tipo: 'numero', sinTotal: true, ancho: 17 },
+          ],
+          filas: dashboardVendedor?.filas || [],
+        },
+        {
+          // Los porcentajes del periodo se recalculan sobre los acumulados, no
+          // son el promedio de los porcentajes diarios: van en su propia hoja.
+          titulo: 'Totales del Periodo',
+          columnas: [
+            { header: 'Concepto', valor: 'concepto', ancho: 26 },
+            { header: 'Valor', valor: 'valor', tipo: 'moneda', ancho: 16 },
+          ],
+          filas: dashboardVendedor?.totales ? [
+            { concepto: 'Gasto publicidad (S/)', valor: Number(dashboardVendedor.totales.gasto) || 0 },
+            { concepto: 'Ventas (S/)', valor: Number(dashboardVendedor.totales.ventas) || 0 },
+            { concepto: 'Utilidad (S/)', valor: Number(dashboardVendedor.totales.utilidad) || 0 },
+            { concepto: 'Efect. Ventas (%)', valor: (Number(dashboardVendedor.totales.efectividad_ventas) || 0) * 100 },
+            { concepto: 'Efect. Utilidad (%)', valor: (Number(dashboardVendedor.totales.efectividad_utilidad) || 0) * 100 },
+            { concepto: 'Clientes', valor: Number(dashboardVendedor.totales.clientes) || 0 },
+            { concepto: 'Leads', valor: Number(dashboardVendedor.totales.leads) || 0 },
+            { concepto: 'Conversion (%)', valor: (Number(dashboardVendedor.totales.tasa_conversion) || 0) * 100 },
+            { concepto: 'Promedio diario gasto (S/)', valor: Number(dashboardVendedor.totales.promedio_diario_gasto) || 0 },
+          ] : [],
+        },
+      ],
+    }),
+
+    campanas: () => ({
+      archivo: 'Marketing_Campanas',
+      titulo: 'Analisis de Marketing — Campañas',
+      filtros: [],
+      secciones: [
+        {
+          titulo: 'Campañas',
+          totales: true,
+          columnas: [
+            { header: 'Nombre', valor: 'nombre', ancho: 32 },
+            { header: 'Plataforma', valor: (c) => PLATAFORMA_MKT_LABEL[c.plataforma] || c.plataforma || '', ancho: 16 },
+            { header: 'Vendedor', valor: (c) => c.vendedor?.nombres || 'Sin asignar', ancho: 24 },
+            { header: 'Presupuesto', valor: (c) => Number(c.presupuesto) || 0, tipo: 'moneda', ancho: 15 },
+            { header: 'Gasto Real', valor: (c) => Number(c.gasto_acumulado) || 0, tipo: 'moneda', ancho: 15 },
+            { header: 'Inicio', valor: (c) => formatearFecha(c.fecha_inicio), ancho: 13 },
+            { header: 'Fin', valor: (c) => (c.fecha_fin ? formatearFecha(c.fecha_fin) : 'Activa'), ancho: 13 },
+            { header: 'Estado', valor: (c) => (c.activa ? 'Activa' : 'Inactiva'), ancho: 11 },
+          ],
+          filas: campanas,
+        },
+      ],
+    }),
+
+    metricas: () => ({
+      archivo: 'Marketing_Metricas',
+      titulo: 'Analisis de Marketing — Metricas',
+      filtros: [
+        ...filtrosPeriodo(),
+        { etiqueta: 'Campaña', valor: filtroMetCampana ? nombreCampana(filtroMetCampana) : 'Todas' },
+      ],
+      secciones: [
+        {
+          titulo: 'Metricas Diarias',
+          totales: true,
+          columnas: [
+            { header: 'Fecha', valor: (m) => formatearFecha(m.fecha), ancho: 14 },
+            { header: 'Campaña', valor: (m) => m.campana?.nombre || '', ancho: 30 },
+            { header: 'Plataforma', valor: (m) => PLATAFORMA_MKT_LABEL[m.campana?.plataforma] || '', ancho: 16 },
+            { header: 'Gasto', valor: (m) => Number(m.gasto) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Leads', valor: (m) => Number(m.leads) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Videos', valor: (m) => Number(m.videos_creados) || 0, tipo: 'numero', ancho: 10 },
+            { header: 'Contenido', valor: (m) => Number(m.contenido_subido) || 0, tipo: 'numero', ancho: 12 },
+            { header: 'Notas', valor: (m) => m.notas || '', ancho: 40 },
+          ],
+          // Todas las del periodo, no solo la pagina visible.
+          filas: metricas,
+        },
+      ],
+    }),
+
+    metricas_custom: () => ({
+      archivo: 'Marketing_Metricas_Personalizadas',
+      titulo: 'Analisis de Marketing — Metricas Personalizadas',
+      filtros: [
+        ...filtrosPeriodo(),
+        {
+          etiqueta: 'Metrica',
+          valor: filtroMetricaCustom
+            ? (metricasCustom.find(m => String(m.id) === String(filtroMetricaCustom))?.nombre || '')
+            : 'Todas',
+        },
+      ],
+      secciones: [
+        {
+          titulo: 'Metricas Definidas',
+          columnas: [
+            { header: 'Nombre', valor: 'nombre', ancho: 26 },
+            { header: 'Unidad', valor: (m) => m.unidad || '', ancho: 12 },
+            { header: 'Descripcion', valor: (m) => m.descripcion || '', ancho: 45 },
+            { header: 'Registros', valor: (m) => Number(m.total_registros) || 0, tipo: 'numero', ancho: 12 },
+            { header: 'Estado', valor: (m) => (m.activa ? 'Activa' : 'Inactiva'), ancho: 11 },
+          ],
+          filas: metricasCustom,
+        },
+        {
+          titulo: 'Registros',
+          columnas: [
+            { header: 'Fecha', valor: (r) => formatearFecha(r.fecha), ancho: 14 },
+            { header: 'Metrica', valor: (r) => r.metrica?.nombre || '', ancho: 26 },
+            { header: 'Unidad', valor: (r) => r.metrica?.unidad || '', ancho: 12 },
+            { header: 'Valor', valor: (r) => Number(r.valor) || 0, tipo: 'moneda', ancho: 14 },
+            { header: 'Notas', valor: (r) => r.notas || '', ancho: 40 },
+          ],
+          filas: registrosCustom,
+        },
+      ],
+    }),
+  };
+
+  const reporteExcel = () => REPORTES_EXCEL[tab]();
+
+  // El boton se apaga cuando el tab visible no tiene nada que exportar.
+  const cargandoTab = cargandoResumen || cargandoDashVend || cargandoCampanas
+    || cargandoMetricas || cargandoCustom || cargandoRegistros;
+  const sinDatosExcel = {
+    // Los KPIs llegan siempre (en cero si el periodo esta vacio): lo que dice
+    // si hay algo que exportar son los dias registrados y los registros custom.
+    dashboard: () => !(Number(resumen?.kpis?.dias_registrados) > 0)
+      && !(resumen?.evolucion_diaria?.length)
+      && !(resumen?.metricas_custom || []).some(m => m.registros?.length),
+    gasto_vendedor: () => !(dashboardVendedor?.filas?.length),
+    campanas: () => campanas.length === 0,
+    metricas: () => metricas.length === 0,
+    metricas_custom: () => metricasCustom.length === 0 && registrosCustom.length === 0,
+  }[tab]();
+
+  // ═══════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-display tracking-wider text-steel-100">Análisis de Marketing</h1>
+        <BotonesExportar
+          formatos={['excel']}
+          deshabilitado={cargandoTab || sinDatosExcel}
+          reporte={reporteExcel}
+        />
       </div>
 
       <Tabs tabs={TABS} tabActual={tab} onChange={setTab} />

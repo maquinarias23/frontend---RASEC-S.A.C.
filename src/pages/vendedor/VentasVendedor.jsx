@@ -19,6 +19,8 @@ import {
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
+import useEsMovil from '../../hooks/useEsMovil';
+import VentasVendedorMovil from './ventas-movil/VentasVendedorMovil';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import TablaGenerica from '../../components/ui/TablaGenerica';
@@ -36,6 +38,11 @@ import {
   ESTADO_TRACKING,
   ESTADO_UNIDAD,
   TIPO_ENTREGA,
+  TIPO_ENTREGA_LABEL,
+  TIPOS_ENTREGA_CON_DESTINO,
+  filtrarDepartamentosContraEntrega,
+  filtrarProvinciasContraEntrega,
+  MSG_CONTRA_ENTREGA_ZONA,
   TIPO_DESTINO,
   TIPO_PRECIO,
   TIPO_DESCUENTO_COMBO,
@@ -45,6 +52,8 @@ import {
   DNI_RUC_INPUT,
   CLIENTE_FORM,
   MSG_PAGO_BLOQUEADO_CLIENTE,
+  COMPROBANTE_NUMERO,
+  ESTADO_COMPROBANTE_LABEL,
 } from '../../config/constants';
 import useAuthStore from '../../store/authStore';
 import { ROLES } from '../../config/roles';
@@ -244,6 +253,9 @@ export default function VentasVendedor() {
   const { datosPaginados, paginaActual, totalPaginas, irAPagina } = usePaginacion(datos);
   const { esRol } = useAuthStore();
   const puedeUsarMayorista = esRol(ROLES.ADMINISTRADOR, ROLES.SUPER_ADMINISTRADOR);
+  // En pantalla de celular se renderiza otro árbol —tarjetas y hojas a pantalla
+  // completa— alimentado por este mismo estado y estos mismos handlers.
+  const esMovil = useEsMovil();
 
   // --- Estado: modal nueva venta ---
   const [modalNuevaVenta, setModalNuevaVenta] = useState(false);
@@ -260,6 +272,9 @@ export default function VentasVendedor() {
   const [distritoId, setDistritoId] = useState('');
   const [transportistas, setTransportistas] = useState([]);
   const [transportistaId, setTransportistaId] = useState('');
+  // Dirección exacta de entrega. Obligatoria en contra-entrega: es a donde va
+  // el motorizado y el punto de llegada que declara la guía de remisión.
+  const [direccionEntrega, setDireccionEntrega] = useState('');
   const [promocionId, setPromocionId] = useState('');
   const [descuentoPuntos, setDescuentoPuntos] = useState(0);
   const [promociones, setPromociones] = useState([]);
@@ -429,6 +444,7 @@ export default function VentasVendedor() {
     setProvincias([]);
     setDistritos([]);
     setTransportistaId('');
+    setDireccionEntrega('');
     setPromocionId('');
     setDescuentoPuntos(0);
     setProductoTemp(null);
@@ -508,6 +524,40 @@ export default function VentasVendedor() {
     } catch {
       setDistritos([]);
     }
+  };
+
+  // ---- Zona de la contra-entrega: Lima Metropolitana y Callao ----
+  // El motorizado no sale de la ciudad, así que los selectores solo ofrecen
+  // lo que puede cubrir. El backend valida lo mismo: esto evita el viaje al
+  // servidor, no lo reemplaza.
+  const esContraEntrega = tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA;
+  const departamentosDisponibles = esContraEntrega
+    ? filtrarDepartamentosContraEntrega(departamentos)
+    : departamentos;
+  const provinciasDisponibles = esContraEntrega
+    ? filtrarProvinciasContraEntrega(provincias)
+    : provincias;
+
+  // Cada departamento de la zona tiene una sola provincia válida (Lima y
+  // Callao), así que se elige sola y el vendedor solo toca el distrito.
+  useEffect(() => {
+    if (!esContraEntrega) return;
+    if (provinciasDisponibles.length !== 1) return;
+    const unica = String(provinciasDisponibles[0].id);
+    if (String(provinciaId) !== unica) handleProvinciaChange(unica);
+  }, [esContraEntrega, provinciasDisponibles, provinciaId]);
+
+  // Cambiar de modalidad descarta agencia y ubigeo: son datos exclusivos del
+  // envío por agencia y arrastrarlos dejaría la venta con destino fantasma.
+  const cambiarTipoEntrega = (valor) => {
+    setTipoEntrega(valor);
+    setTransportistaId('');
+    setDepartamentoId('');
+    setProvinciaId('');
+    setDistritoId('');
+    setProvincias([]);
+    setDistritos([]);
+    setDireccionEntrega('');
   };
 
   // =========================================================================
@@ -791,9 +841,20 @@ export default function VentasVendedor() {
     if (items.length === 0) return toast.error('Agrega al menos un producto');
     if (descuentoPuntos > clientePuntos) return toast.error('No tienes suficientes puntos');
 
-    if (tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA) {
-      if (!transportistaId) return toast.error('Selecciona la agencia transportista');
+    if (tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && !transportistaId) {
+      return toast.error('Selecciona la agencia transportista');
+    }
+    if (TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega)) {
       if (!departamentoId || !provinciaId || !distritoId) return toast.error('Selecciona departamento, provincia y distrito');
+      if (tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA) {
+        if (!direccionEntrega.trim()) {
+          return toast.error('Indica la dirección exacta donde el motorizado hará la entrega');
+        }
+        // Doble control con el backend: si el distrito quedó de una selección
+        // previa fuera de zona, no debe llegar a crearse la venta.
+        const provinciaElegida = provinciasDisponibles.find((p) => String(p.id) === String(provinciaId));
+        if (!provinciaElegida) return toast.error(MSG_CONTRA_ENTREGA_ZONA);
+      }
     }
 
     // Quien recibe es opcional, pero si el vendedor declaró algo debe quedar
@@ -829,9 +890,12 @@ export default function VentasVendedor() {
       formData.append('tipo_entrega', tipoEntrega);
       if (tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA) {
         formData.append('transportista_id', transportistaId);
+      }
+      if (TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega)) {
         formData.append('departamento_id', departamentoId);
         formData.append('provincia_id', provinciaId);
         formData.append('distrito_id', distritoId);
+        if (direccionEntrega.trim()) formData.append('direccion_manual', direccionEntrega.trim());
       }
       formData.append('tipo_destino', tipoDestino);
       formData.append('items', JSON.stringify(items.map((i) => ({
@@ -916,8 +980,10 @@ export default function VentasVendedor() {
     ? parseFloat(ventaPago.saldo_disponible ?? ventaPago.saldo_pendiente ?? 0)
     : 0;
 
+  // El evento llega del submit del formulario (escritorio) o del click del
+  // botón (móvil, donde no hay <form>): de ahí el acceso opcional.
   const registrarPago = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
     if (!ventaPago) return;
     const montoNum = parseFloat(formPago.monto);
     if (!montoNum || montoNum <= 0) return toast.error('Ingresa un monto válido');
@@ -990,6 +1056,52 @@ export default function VentasVendedor() {
   };
 
   // =========================================================================
+  // Reenviar pedido rechazado con un voucher nuevo
+  // =========================================================================
+
+  const reenviarPedido = async () => {
+    if (!voucherReenvio || !ventaReenvio) return;
+    setEnviandoReenvio(true);
+    try {
+      const formData = new FormData();
+      formData.append('voucher', voucherReenvio);
+      await api.post(`/ventas/${ventaReenvio.id}/reenviar`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      toast.success('Pedido reenviado exitosamente');
+      setModalReenvio(false);
+      setModalDetalle(false);
+      setVentaReenvio(null);
+      setVoucherReenvio(null);
+      listar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al reenviar pedido');
+    } finally {
+      setEnviandoReenvio(false);
+    }
+  };
+
+  // Publica al cliente la clave de retiro en tienda.
+  const hacerVisibleClave = async (claveId) => {
+    try {
+      await api.put(`/almacen/clave/${claveId}/hacer-visible`);
+      toast.success('Clave ahora visible al cliente');
+      const { data } = await api.get(`/ventas/${ventaDetalle.id}`);
+      setVentaDetalle(data);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error');
+    }
+  };
+
+  // Aviso al salir del campo de precio en el ajuste: el guardado vuelve a
+  // validarlo, esto solo adelanta el error mientras se escribe.
+  const avisarPrecioBajoMinimo = (item, idx) => {
+    if (!item.es_regalo && item.precio_nuevo < item.precio_minimo) {
+      toast.error(`Precio mínimo: ${formatearMoneda(item.precio_minimo)}`, { id: `adj-min-${idx}` });
+    }
+  };
+
+  // =========================================================================
   // Helpers para condiciones de estado
   // =========================================================================
 
@@ -1054,6 +1166,103 @@ export default function VentasVendedor() {
   const ventaPermiteCancelacion = (fila) =>
     [ESTADO_VENTA.ACTIVA, ESTADO_VENTA.PENDIENTE_APROBACION].includes(fila.estado_venta) &&
     fila.estado_tracking === ESTADO_TRACKING.PEDIDO_REGISTRADO;
+
+  // =========================================================================
+  // Vista de celular
+  //
+  // El árbol de móvil es otro —tarjetas en vez de tabla, hojas a pantalla
+  // completa en vez de modales—, pero se alimenta de este mismo estado y de
+  // estos mismos handlers: `vm` es el único puente. Ninguna regla de negocio,
+  // validación ni llamada al backend se duplica allí, de modo que las dos
+  // vistas no pueden comportarse distinto.
+  //
+  // El retorno es posterior a todos los hooks, así que girar el teléfono o
+  // redimensionar conmuta de árbol sin perder una venta a medio armar.
+  // =========================================================================
+
+  const vm = {
+    // Lista
+    datos, cargando, listar,
+    tieneVoucherRechazado,
+    ventaPermitePago, ventaPermiteCancelacion, ventaPermiteAjuste,
+    verDetalle, abrirModalPago, abrirNuevaVenta,
+
+    // Cancelación
+    confirmCancelar, setConfirmCancelar,
+    motivoCancelacion, setMotivoCancelacion,
+    cancelarVenta,
+
+    // Nueva venta: cliente
+    modalNuevaVenta, setModalNuevaVenta,
+    clienteSeleccionado, setClienteSeleccionado,
+    clientePuntos, setClientePuntos,
+    buscarClientes, seleccionarCliente, alEscribirCliente,
+    clienteExterno, setClienteExterno, vincularClienteExterno, vinculandoExterno,
+    modalCrearCliente, setModalCrearCliente, onClienteCreado,
+    tarjetaCredenciales, setTarjetaCredenciales,
+
+    // Nueva venta: entrega
+    tipoEntrega, cambiarTipoEntrega,
+    tipoDestino, setTipoDestino,
+    transportistas, transportistaId, setTransportistaId,
+    departamentos, provincias, distritos,
+    departamentoId, provinciaId, distritoId,
+    handleDepartamentoChange, handleProvinciaChange, setDistritoId,
+    direccionEntrega, setDireccionEntrega,
+    departamentosDisponibles, provinciasDisponibles,
+
+    // Nueva venta: quién recibe
+    receptor, cambiarCampoReceptor, receptorTieneDatos,
+    guardarReceptor, setGuardarReceptor,
+    contactosCliente, contactoSeleccionado, elegirContactoReceptor,
+
+    // Nueva venta: productos
+    combosDisponibles, cargarCombo, cargandoCombos,
+    buscarProductos, seleccionarProducto,
+    productoTemp, setProductoTemp,
+    stockDisponible, setStockDisponible,
+    cantidadTemp, setCantidadTemp,
+    precioTemp, setPrecioTemp,
+    tipoPrecio, setTipoPrecio, obtenerPrecioPorTipo, puedeUsarMayorista,
+    promocionesProducto, setPromocionesProducto,
+    promoItemTemp, setPromoItemTemp,
+    agregarItem, items, removerItem, toggleRegalo,
+
+    // Nueva venta: cobro
+    promociones, promocionId, setPromocionId,
+    descuentoPuntos, setDescuentoPuntos,
+    subtotalVenta, descuentoPromocionGeneral, descuentoPromocionProducto, totalVenta,
+    conAdelanto, setConAdelanto,
+    montoAdelanto, setMontoAdelanto,
+    metodoPagoAdelanto, setMetodoPagoAdelanto,
+    archivoBoucherAdelanto, setArchivoBoucherAdelanto,
+    metodoPagoPorDefecto: METODOS_PAGO.EFECTIVO,
+    crearVenta, creandoVenta,
+
+    // Pago
+    modalPago, setModalPago, ventaPago,
+    formPago, setFormPago,
+    archivoBoucher, setArchivoBoucher,
+    montoEnVerificacion, saldoDisponiblePago,
+    registrarPago, registrandoPago,
+
+    // Detalle
+    modalDetalle, setModalDetalle,
+    ventaDetalle, setVentaDetalle, cargandoDetalle,
+    modoAjuste, setModoAjuste, iniciarAjuste,
+    itemsAjuste, setItemsAjuste,
+    motivoAjuste, setMotivoAjuste,
+    guardarAjuste, guardandoAjuste, avisarPrecioBajoMinimo,
+    historialAjustes, hacerVisibleClave,
+
+    // Reenvío
+    modalReenvio, setModalReenvio,
+    ventaReenvio, setVentaReenvio,
+    voucherReenvio, setVoucherReenvio,
+    reenviarPedido, enviandoReenvio,
+  };
+
+  if (esMovil) return <VentasVendedorMovil vm={vm} />;
 
   // =========================================================================
   // Render
@@ -1189,17 +1398,24 @@ export default function VentasVendedor() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-steel-200 mb-1">Tipo de Entrega</label>
-              <select className="input-field" value={tipoEntrega} onChange={(e) => { setTipoEntrega(e.target.value); setTransportistaId(''); setDepartamentoId(''); setProvinciaId(''); setDistritoId(''); setProvincias([]); setDistritos([]); }}>
-                <option value={TIPO_ENTREGA.ENVIO_POR_AGENCIA}>Envio por Agencia</option>
-                <option value={TIPO_ENTREGA.RETIRO_EN_TIENDA}>Retiro en Tienda</option>
+              <select className="input-field" value={tipoEntrega} onChange={(e) => cambiarTipoEntrega(e.target.value)}>
+                <option value={TIPO_ENTREGA.ENVIO_POR_AGENCIA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.ENVIO_POR_AGENCIA]}</option>
+                <option value={TIPO_ENTREGA.RETIRO_EN_TIENDA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.RETIRO_EN_TIENDA]}</option>
+                <option value={TIPO_ENTREGA.CONTRA_ENTREGA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.CONTRA_ENTREGA]}</option>
               </select>
             </div>
             {tipoEntrega !== TIPO_ENTREGA.RETIRO_EN_TIENDA && (
               <div>
                 <label className="block text-sm font-medium text-steel-200 mb-1">Tipo Destino</label>
-                <select className="input-field" value={tipoDestino} onChange={(e) => setTipoDestino(e.target.value)}>
+                <select
+                  className="input-field disabled:opacity-60 disabled:cursor-not-allowed"
+                  value={esContraEntrega ? TIPO_DESTINO.LIMA : tipoDestino}
+                  onChange={(e) => setTipoDestino(e.target.value)}
+                  disabled={esContraEntrega}
+                  title={esContraEntrega ? 'La contra-entrega solo llega a Lima y Callao' : undefined}
+                >
                   <option value={TIPO_DESTINO.LIMA}>Lima</option>
-                  <option value={TIPO_DESTINO.PROVINCIA}>Provincia</option>
+                  {!esContraEntrega && <option value={TIPO_DESTINO.PROVINCIA}>Provincia</option>}
                 </select>
               </div>
             )}
@@ -1218,23 +1434,32 @@ export default function VentasVendedor() {
             </div>
           )}
 
-          {/* ---- UBIGEO: Departamento → Provincia → Distrito (solo envío por agencia) ---- */}
-          {tipoEntrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && (
+          {/* ---- UBIGEO: Departamento → Provincia → Distrito ----
+               Envío por agencia y contra-entrega comparten el destino: en el
+               primero alimenta el rótulo, en el segundo la guía de remisión. */}
+          {TIPOS_ENTREGA_CON_DESTINO.includes(tipoEntrega) && (
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-medium text-steel-200 mb-1">Departamento</label>
                 <select className="input-field" value={departamentoId} onChange={(e) => handleDepartamentoChange(e.target.value)} required>
                   <option value="">Seleccionar...</option>
-                  {departamentos.map((d) => (
+                  {departamentosDisponibles.map((d) => (
                     <option key={d.id} value={d.id}>{d.nombre}</option>
                   ))}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-steel-200 mb-1">Provincia</label>
-                <select className="input-field" value={provinciaId} onChange={(e) => handleProvinciaChange(e.target.value)} required disabled={!departamentoId}>
+                <select
+                  className="input-field disabled:opacity-60 disabled:cursor-not-allowed"
+                  value={provinciaId}
+                  onChange={(e) => handleProvinciaChange(e.target.value)}
+                  required
+                  disabled={!departamentoId || (esContraEntrega && provinciasDisponibles.length === 1)}
+                  title={esContraEntrega ? 'Fijada por la zona de reparto' : undefined}
+                >
                   <option value="">{departamentoId ? 'Seleccionar...' : 'Primero elija depto.'}</option>
-                  {provincias.map((p) => (
+                  {provinciasDisponibles.map((p) => (
                     <option key={p.id} value={p.id}>{p.nombre}</option>
                   ))}
                 </select>
@@ -1248,6 +1473,39 @@ export default function VentasVendedor() {
                   ))}
                 </select>
               </div>
+            </div>
+          )}
+
+          {/* ---- DIRECCIÓN EXACTA (solo contra-entrega) ---- */}
+          {tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA && (
+            <div>
+              <label className="block text-sm font-medium text-steel-200 mb-1">
+                Dirección de entrega <span className="text-red-600">*</span>
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                value={direccionEntrega}
+                onChange={(e) => setDireccionEntrega(e.target.value)}
+                placeholder="Calle, número, piso/interior y referencia"
+                maxLength={500}
+              />
+              <p className="text-[11px] text-steel-400 mt-1">
+                Es a donde va el motorizado y el punto de llegada que declara la guía de remisión.
+              </p>
+            </div>
+          )}
+
+          {/* ---- MENSAJE CONTRA-ENTREGA ---- */}
+          {tipoEntrega === TIPO_ENTREGA.CONTRA_ENTREGA && (
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-700">
+              <p className="font-medium">El cliente paga al recibir el pedido</p>
+              <p className="text-xs mt-1">
+                Puede salir del almacén sin adelanto: en ese caso Admin o Supervisión debe autorizar la
+                salida. El motorizado entrega solo después de que el abono del total quede registrado y
+                aprobado. Este pedido no genera rótulo, genera guía de remisión.
+              </p>
+              <p className="text-xs mt-1 font-medium">{MSG_CONTRA_ENTREGA_ZONA}</p>
             </div>
           )}
 
@@ -2040,6 +2298,19 @@ export default function VentasVendedor() {
                 <span className="text-purple-600 font-medium text-xs block mb-1">Retiro en Tienda</span>
                 <p className="text-purple-600">El cliente retirará el producto en tienda. La entrega es gestionada por almacén.</p>
               </div>
+            ) : ventaDetalle.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA ? (
+              <div className="bg-amber-50 rounded-lg p-3 text-sm">
+                <span className="text-amber-700 font-medium text-xs block mb-1">Entrega a contra-entrega</span>
+                <p className="text-amber-700">{ventaDetalle.direccion_manual || 'Sin dirección registrada'}</p>
+                {ventaDetalle.tbl_departamentos && (
+                  <p className="text-amber-600 text-xs mt-0.5">
+                    {ventaDetalle.tbl_departamentos.nombre} / {ventaDetalle.tbl_provincias?.nombre} / {ventaDetalle.tbl_distritos?.nombre}
+                  </p>
+                )}
+                <p className="text-amber-600 text-xs mt-1">
+                  El motorizado entrega el pedido una vez que el cliente abona el total pendiente.
+                </p>
+              </div>
             ) : ventaDetalle.tbl_departamentos ? (
               <div className="bg-blue-50 rounded-lg p-3 text-sm">
                 <span className="text-blue-600 font-medium text-xs block mb-1">Destino de envío</span>
@@ -2162,11 +2433,7 @@ export default function VentasVendedor() {
                                 updated[idx] = { ...item, precio_nuevo: precio };
                                 setItemsAjuste(updated);
                               }}
-                              onBlur={() => {
-                                if (!item.es_regalo && item.precio_nuevo < item.precio_minimo) {
-                                  toast.error(`Precio mínimo: ${formatearMoneda(item.precio_minimo)}`, { id: `adj-min-${idx}` });
-                                }
-                              }}
+                              onBlur={() => avisarPrecioBajoMinimo(item, idx)}
                             />
                             {!item.es_regalo && item.precio_minimo > 0 && (
                               <div className={`text-[9px] mt-0.5 ${item.precio_nuevo < item.precio_minimo ? 'text-red-500 font-bold' : 'text-amber-500'}`}>
@@ -2344,6 +2611,35 @@ export default function VentasVendedor() {
               </div>
             )}
 
+            {/* Guía de remisión (contra-entrega): es el documento que acompaña
+                la mercadería, en lugar del rótulo que usa el envío por agencia. */}
+            {ventaDetalle.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA && ventaDetalle.guias_remision?.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-steel-200 mb-2">Guía de remisión</h4>
+                {ventaDetalle.guias_remision.filter((g) => !g.anulado).map((g) => (
+                  <div key={g.id} className="bg-steel-900/50 rounded-lg px-3 py-2 text-sm flex items-center justify-between gap-3">
+                    <div>
+                      <span className="font-mono font-bold text-steel-100">
+                        {COMPROBANTE_NUMERO.formatear(g.serie, g.numero)}
+                      </span>
+                      <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-steel-800 text-steel-300">
+                        {ESTADO_COMPROBANTE_LABEL[g.estado] || g.estado}
+                      </span>
+                      <p className="text-xs text-steel-500 mt-0.5">
+                        Motorizado: {g.chofer_nombres} — Placa {g.vehiculo_placa}
+                      </p>
+                    </div>
+                    {g.pdf_url && (
+                      <a href={g.pdf_url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-primary-500 hover:text-primary-400 whitespace-nowrap">
+                        Ver PDF
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Clave secreta (retiro en tienda) */}
             {ventaDetalle.tipo_entrega === TIPO_ENTREGA.RETIRO_EN_TIENDA && ventaDetalle.claves_secretas?.length > 0 && (
               <div>
@@ -2358,14 +2654,7 @@ export default function VentasVendedor() {
                     </div>
                     {!cs.visible_cliente && ventaDetalle.pago_completo && (
                       <button
-                        onClick={async () => {
-                          try {
-                            await api.put(`/almacen/clave/${cs.id}/hacer-visible`);
-                            toast.success('Clave ahora visible al cliente');
-                            const { data } = await api.get(`/ventas/${ventaDetalle.id}`);
-                            setVentaDetalle(data);
-                          } catch (err) { toast.error(err.response?.data?.error || 'Error'); }
-                        }}
+                        onClick={() => hacerVisibleClave(cs.id)}
                         className="text-xs bg-emerald-100 text-emerald-600 px-3 py-1 rounded hover:bg-emerald-200 flex items-center gap-1"
                       >
                         <HiOutlineKey className="w-3.5 h-3.5" /> Hacer visible
@@ -2482,25 +2771,7 @@ export default function VentasVendedor() {
             </button>
             <button
               disabled={!voucherReenvio || enviandoReenvio}
-              onClick={async () => {
-                if (!voucherReenvio || !ventaReenvio) return;
-                setEnviandoReenvio(true);
-                try {
-                  const formData = new FormData();
-                  formData.append('voucher', voucherReenvio);
-                  await api.post(`/ventas/${ventaReenvio.id}/reenviar`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-                  toast.success('Pedido reenviado exitosamente');
-                  setModalReenvio(false);
-                  setModalDetalle(false);
-                  setVentaReenvio(null);
-                  setVoucherReenvio(null);
-                  listar();
-                } catch (err) {
-                  toast.error(err.response?.data?.error || 'Error al reenviar pedido');
-                } finally {
-                  setEnviandoReenvio(false);
-                }
-              }}
+              onClick={reenviarPedido}
               className="btn-primary flex items-center gap-2"
             >
               {enviandoReenvio ? 'Enviando...' : 'Reenviar Pedido'}

@@ -33,6 +33,35 @@ export const PASOS_TRACKING = Object.entries(ESTADO_TRACKING_LABEL).map(
   ([key, label]) => ({ key, label })
 );
 
+// Los tres tipos de entrega recorren los MISMOS estados de tracking, pero esos
+// estados significan cosas distintas en cada uno: "en ruta a agencia" es el
+// motorizado saliendo con el pedido en una contra-entrega, y "dejado en
+// agencia" es el cliente recibiéndolo en su puerta. Sin esta traducción el
+// cliente de una contra-entrega leería que su pedido quedó en una agencia a la
+// que nunca fue. Los `key` no cambian: solo el texto que se le muestra.
+const ETIQUETAS_TRACKING_POR_ENTREGA = {
+  contra_entrega: {
+    [ESTADO_TRACKING.ALMACEN]: 'Preparado en almacén',
+    [ESTADO_TRACKING.EN_RUTA_A_AGENCIA]: 'En camino con el motorizado',
+    [ESTADO_TRACKING.DEJADO_EN_AGENCIA]: 'Entregado al cliente',
+  },
+  retiro_en_tienda: {
+    [ESTADO_TRACKING.ALMACEN]: 'Listo en tienda',
+    [ESTADO_TRACKING.EN_RUTA_A_AGENCIA]: 'Preparado para recojo',
+    [ESTADO_TRACKING.DEJADO_EN_AGENCIA]: 'Retirado por el cliente',
+  },
+};
+
+/** Etiqueta de un estado de tracking leída desde el tipo de entrega. */
+export const etiquetaTracking = (estado, tipoEntrega) =>
+  ETIQUETAS_TRACKING_POR_ENTREGA[tipoEntrega]?.[estado]
+  || ESTADO_TRACKING_LABEL[estado]
+  || estado;
+
+/** Pasos del timeline con los textos que corresponden al tipo de entrega. */
+export const pasosTrackingPara = (tipoEntrega) =>
+  PASOS_TRACKING.map((paso) => ({ ...paso, label: etiquetaTracking(paso.key, tipoEntrega) }));
+
 // Estados de unidad (Prisma enum: EstadoUnidad)
 export const ESTADO_UNIDAD = {
   DISPONIBLE: 'disponible',
@@ -42,14 +71,57 @@ export const ESTADO_UNIDAD = {
   DEJADO_EN_AGENCIA: 'dejado_en_agencia',
   RETIRADO_EN_TIENDA: 'retirado_en_tienda',
   RETIRADO_EN_AGENCIA: 'retirado_en_agencia',
+  ENTREGADO_CONTRAENTREGA: 'entregado_contraentrega',
   CANCELADA_REVERTIDA: 'cancelada_revertida',
 };
 
 // Tipos de entrega (Prisma enum: TipoEntrega)
+// CONTRA_ENTREGA: sale del almacén con un motorizado externo y el cliente paga
+// el saldo al recibirlo. No genera rótulo, sí guía de remisión.
 export const TIPO_ENTREGA = {
   ENVIO_POR_AGENCIA: 'envio_por_agencia',
   RETIRO_EN_TIENDA: 'retiro_en_tienda',
+  CONTRA_ENTREGA: 'contra_entrega',
 };
+
+export const TIPO_ENTREGA_LABEL = {
+  [TIPO_ENTREGA.ENVIO_POR_AGENCIA]: 'Envío por Agencia',
+  [TIPO_ENTREGA.RETIRO_EN_TIENDA]: 'Retiro en Tienda',
+  [TIPO_ENTREGA.CONTRA_ENTREGA]: 'A contra-entrega',
+};
+
+// Tipos de entrega que exigen destino (ubigeo + dirección) al registrar la
+// venta: en ambos la mercadería viaja a un punto declarado.
+export const TIPOS_ENTREGA_CON_DESTINO = [
+  TIPO_ENTREGA.ENVIO_POR_AGENCIA,
+  TIPO_ENTREGA.CONTRA_ENTREGA,
+];
+
+// ---- ZONA DE COBERTURA DE LA CONTRA-ENTREGA ----
+// Mirror de PROVINCIAS_CONTRA_ENTREGA / DEPARTAMENTOS_CONTRA_ENTREGA en
+// backend/config/constants.js. El motorizado solo reparte en Lima
+// Metropolitana y Callao: es lo que cubre en el día.
+//
+// Se filtra por CÓDIGO de ubigeo y no por nombre, igual que en el backend:
+// los nombres son editables y una tilde dejaría pasar un destino inválido.
+// 15 = Lima, 07 = Callao; 1501 = provincia de Lima, 0701 = Callao.
+export const DEPARTAMENTOS_CONTRA_ENTREGA = ['15', '07'];
+export const PROVINCIAS_CONTRA_ENTREGA = ['1501', '0701'];
+
+/** Departamentos que admiten contra-entrega, en el orden de uso real. */
+export const filtrarDepartamentosContraEntrega = (departamentos) =>
+  (departamentos || [])
+    .filter((d) => DEPARTAMENTOS_CONTRA_ENTREGA.includes(d.codigo))
+    .sort((a, b) =>
+      DEPARTAMENTOS_CONTRA_ENTREGA.indexOf(a.codigo) - DEPARTAMENTOS_CONTRA_ENTREGA.indexOf(b.codigo));
+
+/** Provincias que admiten contra-entrega (una sola por departamento). */
+export const filtrarProvinciasContraEntrega = (provincias) =>
+  (provincias || []).filter((p) => PROVINCIAS_CONTRA_ENTREGA.includes(p.codigo));
+
+export const MSG_CONTRA_ENTREGA_ZONA =
+  'La contra-entrega solo llega a Lima Metropolitana y Callao. '
+  + 'Para otros destinos registra la venta como envío por agencia.';
 
 // Tipos de destino (Prisma enum: TipoDestino)
 export const TIPO_DESTINO = {
@@ -376,6 +448,16 @@ DNI_RUC_INPUT.esValido = (v) => {
 //   de la app (no se usa <input type="email">, cuya validación nativa aborta el
 //   submit sin explicar nada al usuario).
 // Mirror de EMAIL en backend/config/constants.js.
+
+// Ubigeo (catálogo 13 SUNAT). Mirror de UBIGEO en backend/config/constants.js.
+// Código de 6 dígitos del distrito; lo exige la guía de remisión tanto para el
+// punto de partida como para el de llegada.
+export const UBIGEO = {
+  LONGITUD: 6,
+};
+UBIGEO.MSG_INVALIDO = `El ubigeo debe tener ${UBIGEO.LONGITUD} dígitos (código del distrito según SUNAT)`;
+UBIGEO.esValido = (valor) => /^\d{6}$/.test((valor == null ? '' : String(valor)).trim());
+
 export const EMAIL_INPUT = {
   MAX_LENGTH: 150, // Espejo de tbl_clientes.email VARCHAR(150)
   REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/,
@@ -572,6 +654,7 @@ export const TIPO_COMPROBANTE = {
   BOLETA: 'boleta',
   NOTA_CREDITO: 'nota_credito',
   NOTA_DEBITO: 'nota_debito',
+  GUIA_REMISION: 'guia_remision',
 };
 
 // Códigos SUNAT por tipo de comprobante (catálogo 01 SUNAT, campo codigo_tipo_documento)
@@ -580,6 +663,7 @@ export const CODIGO_TIPO_COMPROBANTE = {
   [TIPO_COMPROBANTE.BOLETA]: '03',
   [TIPO_COMPROBANTE.NOTA_CREDITO]: '07',
   [TIPO_COMPROBANTE.NOTA_DEBITO]: '08',
+  [TIPO_COMPROBANTE.GUIA_REMISION]: '09',
 };
 
 // Prefijo de serie SUNAT por tipo de comprobante (F para factura/notas, B para boleta)
@@ -588,6 +672,8 @@ export const PREFIJO_SERIE_COMPROBANTE = {
   [TIPO_COMPROBANTE.BOLETA]: 'B',
   [TIPO_COMPROBANTE.NOTA_CREDITO]: 'F',
   [TIPO_COMPROBANTE.NOTA_DEBITO]: 'F',
+  // La guía de remisión electrónica remitente lleva serie "T" (T001, T002...).
+  [TIPO_COMPROBANTE.GUIA_REMISION]: 'T',
 };
 
 // Estados de comprobante (Prisma enum: EstadoComprobante)
@@ -673,6 +759,7 @@ export const TIPO_COMPROBANTE_LABEL = {
   [TIPO_COMPROBANTE.BOLETA]: 'Boleta de Venta',
   [TIPO_COMPROBANTE.NOTA_CREDITO]: 'Nota de Crédito',
   [TIPO_COMPROBANTE.NOTA_DEBITO]: 'Nota de Débito',
+  [TIPO_COMPROBANTE.GUIA_REMISION]: 'Guía de Remisión Electrónica',
 };
 
 // Validación de la serie de un CPE. Mirror de SERIE_COMPROBANTE en
@@ -687,6 +774,7 @@ export const SERIE_COMPROBANTE = {
     [TIPO_COMPROBANTE.BOLETA]: ['B'],
     [TIPO_COMPROBANTE.NOTA_CREDITO]: ['F', 'B'],
     [TIPO_COMPROBANTE.NOTA_DEBITO]: ['F', 'B'],
+    [TIPO_COMPROBANTE.GUIA_REMISION]: ['T'],
   },
   MSG_FORMATO: 'La serie debe tener 4 caracteres: una letra seguida de 3 letras o dígitos (ej. F001, B001, FC01)',
 };
@@ -1118,14 +1206,37 @@ export const EMPRESA = {
   LOGO_URL: '/logo-rasec.png',
 };
 
-// Textos y reglas del documento de cotización exportable
+// Textos y reglas del documento de cotización exportable.
+// El documento replica la representación impresa de la factura electrónica del
+// emisor (mismo encabezado, misma grilla de ítems y mismo pie de totales) para
+// que el cliente reciba siempre la misma hoja, cotice o compre.
 export const COTIZACION_EXPORT = {
   TITULO_DOC: 'COTIZACIÓN',
+  // Prefijo y largo del correlativo impreso: "COT-000012". No es una serie
+  // SUNAT, por eso no imita el patrón F001 de los comprobantes.
+  SERIE_PREFIJO: 'COT',
+  DIGITOS_NUMERO: 6,
   // Días de vigencia de la oferta, se imprime como "Válida hasta".
   DIAS_VALIDEZ: 7,
   MONEDA_NOMBRE: 'SOLES',
   MONEDA_ETIQUETA: 'SOLES (S/)',
+  MONEDA_SIMBOLO: 'S/',
+  // Los precios de la cotización ya incluyen IGV: el documento los desagrega
+  // en operación gravada + IGV, igual que la factura.
+  IGV_TASA: 0.18,
+  UNIDAD_DEFECTO: 'UND',
+  // Catálogo 03 SUNAT abreviado como se imprime en el comprobante.
+  UNIDAD_CORTA: {
+    NIU: 'UND',
+    ZZ: 'SERV',
+    KGM: 'KG',
+    LTR: 'LT',
+    MTR: 'MT',
+    BX: 'CJA',
+  },
   ETIQUETA_OBSEQUIO: 'OBSEQUIO',
+  ETIQUETA_VALIDEZ: 'Validez de la oferta',
+  PIE_REPRESENTACION: 'Representación impresa de la COTIZACIÓN',
   CONDICIONES: [
     'Precios expresados en Soles (S/) e incluyen IGV.',
     'La disponibilidad de stock se confirma al momento de la aceptación.',

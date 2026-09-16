@@ -53,6 +53,11 @@ export const destinoDeVenta = (venta) => {
     venta?.tbl_provincias?.nombre,
     venta?.tbl_distritos?.nombre,
   ].filter(Boolean);
+  // En contra-entrega el ubigeo solo ubica la zona: lo que identifica el
+  // destino es la dirección exacta a la que va el motorizado.
+  if (venta?.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA && venta?.direccion_manual) {
+    return partes.length ? `${venta.direccion_manual} (${partes.join(' / ')})` : venta.direccion_manual;
+  }
   if (partes.length) return partes.join(' / ');
   return venta?.direccion_manual || '';
 };

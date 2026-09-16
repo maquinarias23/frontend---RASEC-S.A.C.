@@ -129,9 +129,12 @@ export default function EscanerSalida() {
       toast.success(data.mensaje);
     } catch (err) {
       const respData = err.response?.data;
-      if (respData?.tipo === TIPO_ENTREGA.RETIRO_EN_TIENDA) {
+      // Retiro en tienda y contra-entrega no salen por agencia: el escáner lo
+      // explica en vez de tratarlo como un fallo de lectura.
+      if (respData?.tipo === TIPO_ENTREGA.RETIRO_EN_TIENDA || respData?.tipo === TIPO_ENTREGA.CONTRA_ENTREGA) {
         setAlertaRetiro({
           mensaje: respData.error,
+          tipo: respData.tipo,
           ventaId: respData.venta?.id,
           cliente: respData.venta?.cliente,
         });
@@ -404,9 +407,15 @@ export default function EscanerSalida() {
                     <HiOutlineExclamation className="w-7 h-7 text-amber-600" />
                   </div>
                   <div>
-                    <p className="text-lg font-bold text-amber-600">Recojo en Tienda</p>
+                    <p className="text-lg font-bold text-amber-600">
+                      {alertaRetiro.tipo === TIPO_ENTREGA.CONTRA_ENTREGA ? 'Pedido a contra-entrega' : 'Recojo en Tienda'}
+                    </p>
                     <p className="text-steel-300 text-sm mt-1">
-                      Este pedido <strong>no se envía por agencia</strong>. El cliente lo recoge directamente en tienda.
+                      {alertaRetiro.tipo === TIPO_ENTREGA.CONTRA_ENTREGA ? (
+                        <>Este pedido <strong>no se envía por agencia</strong>. Sale con un motorizado externo desde la Bandeja de Despacho.</>
+                      ) : (
+                        <>Este pedido <strong>no se envía por agencia</strong>. El cliente lo recoge directamente en tienda.</>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -415,7 +424,11 @@ export default function EscanerSalida() {
                   <p><span className="text-steel-500">Cliente:</span> <span className="font-bold">{alertaRetiro.cliente}</span></p>
                   <div className="flex items-center gap-2 mt-2 pt-2 border-t border-steel-700/50">
                     <HiOutlineShoppingBag className="w-4 h-4 text-amber-600" />
-                    <span className="text-amber-400 text-xs font-medium">La entrega se gestiona desde la Bandeja de Despacho</span>
+                    <span className="text-amber-400 text-xs font-medium">
+                      {alertaRetiro.tipo === TIPO_ENTREGA.CONTRA_ENTREGA
+                        ? 'Despache el pedido desde la Bandeja de Despacho y autorice la entrega en Contra-entregas'
+                        : 'La entrega se gestiona desde la Bandeja de Despacho'}
+                    </span>
                   </div>
                 </div>
                 <button onClick={escanearOtro} className="btn-primary w-full mt-4">

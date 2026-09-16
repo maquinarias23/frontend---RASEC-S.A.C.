@@ -6,7 +6,7 @@ import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import { buildMediaUrl } from '../../utils/media';
-import { ESTADO_TRACKING, TIPO_ENTREGA, TELEFONO_INPUT } from '../../config/constants';
+import { ESTADO_TRACKING, TIPO_ENTREGA, TELEFONO_INPUT, pasosTrackingPara } from '../../config/constants';
 
 const imgUrl = buildMediaUrl;
 
@@ -90,7 +90,7 @@ export default function Tracking() {
           {/* Timeline visual */}
           <div className="card-chromium">
             <h3 className="label-chromium mb-6">Estado del envío</h3>
-            <TimelineTracking estadoActual={venta.estado_tracking} historial={venta.historial_tracking || []} />
+            <TimelineTracking estadoActual={venta.estado_tracking} pasos={pasosTrackingPara(venta.tipo_entrega)} historial={venta.historial_tracking || []} />
           </div>
 
           {/* Evidencia del envío */}
@@ -138,6 +138,23 @@ export default function Tracking() {
                   <p className="text-sm text-steel-400">La contraseña de recojo se mostrará cuando el pedido sea entregado en agencia y todos los pagos estén verificados.</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Contra-entrega: el cliente paga al recibir */}
+          {venta.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA && (
+            <div className="card-chromium">
+              <h3 className="label-chromium mb-3">Entrega a domicilio (contra-entrega)</h3>
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                <p className="text-sm text-amber-400">
+                  {venta.estado_tracking === ESTADO_TRACKING.DEJADO_EN_AGENCIA
+                    ? 'Tu pedido fue entregado.'
+                    : 'Un motorizado llevará tu pedido a la dirección registrada. El pago del total pendiente se realiza antes de recibirlo.'}
+                </p>
+                {venta.direccion_manual && (
+                  <p className="text-xs text-steel-400 mt-2">Dirección de entrega: {venta.direccion_manual}</p>
+                )}
+              </div>
             </div>
           )}
 

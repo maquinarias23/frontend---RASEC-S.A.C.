@@ -13,8 +13,9 @@ import { exportarReporteExcel, exportarReportePdf } from '../../utils/exportarRe
  * @param {() => Object} reporte - Devuelve la descripcion del reporte
  *   (ver `utils/exportarReporte`).
  * @param {boolean} [deshabilitado] - Sin datos que exportar.
+ * @param {string[]} [formatos] - Que botones mostrar; por defecto ambos.
  */
-export default function BotonesExportar({ reporte, deshabilitado = false, className = '' }) {
+export default function BotonesExportar({ reporte, deshabilitado = false, className = '', formatos = ['excel', 'pdf'] }) {
   const [ocupado, setOcupado] = useState(null); // 'excel' | 'pdf' | null
 
   const exportar = async (formato) => {
@@ -42,6 +43,7 @@ export default function BotonesExportar({ reporte, deshabilitado = false, classN
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
+      {formatos.includes('excel') && (
       <button
         type="button"
         onClick={() => exportar('excel')}
@@ -52,6 +54,8 @@ export default function BotonesExportar({ reporte, deshabilitado = false, classN
         <HiOutlineTable className="w-4 h-4" />
         {ocupado === 'excel' ? 'Generando...' : 'Excel'}
       </button>
+      )}
+      {formatos.includes('pdf') && (
       <button
         type="button"
         onClick={() => exportar('pdf')}
@@ -62,6 +66,7 @@ export default function BotonesExportar({ reporte, deshabilitado = false, classN
         <HiOutlineDocumentDownload className="w-4 h-4" />
         {ocupado === 'pdf' ? 'Generando...' : 'PDF'}
       </button>
+      )}
     </div>
   );
 }

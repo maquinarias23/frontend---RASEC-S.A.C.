@@ -17,7 +17,7 @@ const FORM_VACIO = {
 
 // Modal reusable para crear/editar cliente. Incluye datos fiscales (requeridos
 // para emisión de comprobantes electrónicos: RUC, dirección fiscal y ubigeo).
-export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardado }) {
+export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardado, zIndex }) {
   const [form, setForm] = useState(FORM_VACIO);
   const [verPass, setVerPass] = useState(false);
   const [guardando, setGuardando] = useState(false);
@@ -259,7 +259,7 @@ export default function ModalEditarCliente({ abierto, cerrar, cliente, onGuardad
 
   return (
     <>
-    <Modal abierto={abierto} cerrar={cerrar} titulo={modoEditar ? CLIENTE_FORM.tituloEditar : CLIENTE_FORM.tituloCrear}>
+    <Modal abierto={abierto} cerrar={cerrar} titulo={modoEditar ? CLIENTE_FORM.tituloEditar : CLIENTE_FORM.tituloCrear} zIndex={zIndex}>
       <form onSubmit={guardar} className="space-y-4">
         {/* El documento va primero: identifica al cliente y permite avisar de
             uno ya existente antes de que se rellene el resto del formulario. */}

@@ -21,6 +21,7 @@ const coloresEstado = {
   [ESTADO_UNIDAD.DEJADO_EN_AGENCIA]: 'bg-indigo-500/15 text-indigo-600 border-indigo-500/30',
   [ESTADO_UNIDAD.RETIRADO_EN_TIENDA]: 'bg-teal-500/15 text-teal-600 border-teal-500/30',
   [ESTADO_UNIDAD.RETIRADO_EN_AGENCIA]: 'bg-teal-500/15 text-teal-600 border-teal-500/30',
+  [ESTADO_UNIDAD.ENTREGADO_CONTRAENTREGA]: 'bg-teal-500/15 text-teal-600 border-teal-500/30',
   [ESTADO_UNIDAD.CANCELADA_REVERTIDA]: 'bg-red-500/15 text-red-600 border-red-500/30',
   // Tracking
   [ESTADO_TRACKING.PEDIDO_REGISTRADO]: 'bg-blue-500/15 text-blue-600 border-blue-500/30',

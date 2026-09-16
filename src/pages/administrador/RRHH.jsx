@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import {
   HiOutlinePlus, HiOutlineUserGroup, HiOutlineClock, HiOutlineCash,
-  HiOutlineGift, HiOutlineChevronLeft, HiOutlineChevronRight, HiOutlineChevronDown,
-  HiOutlineSave, HiOutlineRefresh, HiOutlineChartBar, HiOutlineTrash, HiOutlineDownload,
-  HiOutlineInformationCircle, HiOutlineAdjustments,
+  HiOutlineGift, HiOutlineChevronLeft, HiOutlineChevronRight,
+  HiOutlineRefresh, HiOutlineChartBar, HiOutlineAdjustments,
 } from 'react-icons/hi';
 import useCrud from '../../hooks/useCrud';
 import api from '../../api/axios';
@@ -12,7 +11,8 @@ import TablaGenerica from '../../components/ui/TablaGenerica';
 import Modal from '../../components/ui/Modal';
 import Tabs from '../../components/ui/Tabs';
 import ConstructorComisiones from '../../components/rrhh/ConstructorComisiones';
-import { formatearFecha, formatearFechaHora, formatearMoneda, formatearFechaHoraPrecisa } from '../../utils/formato';
+import LiquidacionComisiones from '../../components/rrhh/LiquidacionComisiones';
+import { formatearFecha, formatearFechaHora, formatearMoneda } from '../../utils/formato';
 import { ESTADO_ASISTENCIA, MESES } from '../../config/constants';
 
 const TABS_RRHH = [
@@ -23,6 +23,16 @@ const TABS_RRHH = [
   { key: 'constructor', label: 'Constructor de Comisiones', icono: <HiOutlineAdjustments className="w-4 h-4 inline" /> },
   { key: 'ranking', label: 'Ranking', icono: <HiOutlineChartBar className="w-4 h-4 inline" /> },
 ];
+
+// Las dos métricas del ranking. Deben coincidir con METRICA_RANKING del
+// backend: el backend rechaza cualquier otra.
+const METRICAS_RANKING = [
+  { key: 'venta_bruta', label: 'Venta bruta', peso_defecto: 50 },
+  { key: 'clientes', label: 'Clientes atendidos', peso_defecto: 50 },
+];
+
+const etiquetaMetricaRanking = (key) =>
+  METRICAS_RANKING.find((m) => m.key === key)?.label || key.replace(/_/g, ' ');
 
 const colEmpleados = [
   { key: 'id', label: 'ID' },
@@ -74,101 +84,6 @@ export default function RRHH() {
   const [formTardanza, setFormTardanza] = useState({ empleado_id: '', fecha: '', minutos: '', motivo: '' });
   const [formBono, setFormBono] = useState({ empleado_id: '', monto: '', descripcion: '', fecha: '' });
 
-  // === COMISIONES STATE ===
-  const [mesComision, setMesComision] = useState(() => {
-    const hoy = new Date();
-    return { mes: hoy.getMonth() + 1, anio: hoy.getFullYear() };
-  });
-  const [rangosComision, setRangosComision] = useState([]);
-  const [cargandoRangos, setCargandoRangos] = useState(false);
-  const [editandoRangos, setEditandoRangos] = useState(false);
-  const [rangosEditados, setRangosEditados] = useState([]);
-  const [tipoComision, setTipoComision] = useState('mensual');
-  const [semanaComision, setSemanaComision] = useState(1);
-  const [previewComisiones, setPreviewComisiones] = useState(null);
-  const [cargandoPreview, setCargandoPreview] = useState(false);
-  const [guardandoComisiones, setGuardandoComisiones] = useState(false);
-  const [historialComisiones, setHistorialComisiones] = useState([]);
-  const [cargandoHistorial, setCargandoHistorial] = useState(false);
-  const [vendedoresExpandidos, setVendedoresExpandidos] = useState({});
-
-  const exportarComisionesExcel = () => {
-    if (!previewComisiones?.detalles?.length) return;
-    import('xlsx').then(XLSX => {
-      const filas = [];
-      const periodo = tipoComision === 'semanal'
-        ? `Semana ${semanaComision} - ${MESES[mesComision.mes - 1]} ${mesComision.anio}`
-        : `${MESES[mesComision.mes - 1]} ${mesComision.anio}`;
-
-      for (const vendedor of previewComisiones.detalles) {
-        // Fila de encabezado del vendedor
-        filas.push({ Vendedor: vendedor.vendedor_nombre, Fecha: '', Cliente: '', Producto: '', Destino: '', Venta: '', Costo: '', Flete: '', Parihuela: '', Regalos: '', 'Costo Total': '', Ganancia: '', '% Margen': '' });
-        for (const v of vendedor.ventas) {
-          filas.push({
-            Vendedor: '',
-            Fecha: v.fecha ? new Date(v.fecha).toLocaleDateString('es-PE') : '',
-            Cliente: v.cliente,
-            Producto: v.productos,
-            Destino: v.destino,
-            Venta: Number(v.monto_venta) || 0,
-            Costo: Number(v.costo_productos) || 0,
-            Flete: Number(v.costo_flete) || 0,
-            Parihuela: Number(v.costo_parihuela) || 0,
-            Regalos: Number(v.costo_regalos) || 0,
-            'Costo Total': Number(v.costo_total) || 0,
-            Ganancia: Number(v.ganancia) || 0,
-            '% Margen': `${(v.margen * 100).toFixed(1)}%`,
-          });
-        }
-        // Fila de totales
-        filas.push({
-          Vendedor: '', Fecha: '', Cliente: '', Producto: '', Destino: 'TOTALES',
-          Venta: Number(vendedor.totales.venta_bruta) || 0,
-          Costo: Number(vendedor.totales.costo_productos) || 0,
-          Flete: Number(vendedor.totales.costo_flete_total) || 0,
-          Parihuela: Number(vendedor.totales.costo_parihuela_total) || 0,
-          Regalos: Number(vendedor.totales.costo_regalos_total) || 0,
-          'Costo Total': Number(vendedor.totales.costo_total) || 0,
-          Ganancia: Number(vendedor.totales.ganancia_total) || 0,
-          '% Margen': `${(vendedor.totales.margen_total * 100).toFixed(1)}%`,
-        });
-        // Fila de comisión
-        filas.push({
-          Vendedor: '', Fecha: '', Cliente: '', Producto: '', Destino: '',
-          Venta: '', Costo: '', Flete: '', Parihuela: '', Regalos: '',
-          'Costo Total': `Comision (${vendedor.totales.porcentaje_aplicado}%):`,
-          Ganancia: Number(vendedor.totales.comision_total) || 0,
-          '% Margen': '',
-        });
-        // Fila vacía separadora
-        filas.push({});
-      }
-
-      // Resumen general
-      filas.push({
-        Vendedor: 'RESUMEN GENERAL', Fecha: '', Cliente: '', Producto: '', Destino: '',
-        Venta: '', Costo: '', Flete: '', Parihuela: '', Regalos: '',
-        'Costo Total': 'Ganancia total:',
-        Ganancia: Number(previewComisiones.total_ganancia) || 0,
-        '% Margen': '',
-      });
-      filas.push({
-        Vendedor: '', Fecha: '', Cliente: '', Producto: '', Destino: '',
-        Venta: '', Costo: '', Flete: '', Parihuela: '', Regalos: '',
-        'Costo Total': 'Total comisiones:',
-        Ganancia: Number(previewComisiones.total_comisiones) || 0,
-        '% Margen': '',
-      });
-
-      const ws = XLSX.utils.json_to_sheet(filas);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Comisiones');
-
-      const nombreArchivo = `Comisiones_${periodo.replace(/ /g, '_')}.xlsx`;
-      XLSX.writeFile(wb, nombreArchivo);
-    });
-  };
-
   // === RANKING STATE ===
   const [configRanking, setConfigRanking] = useState([]);
   const [editandoRanking, setEditandoRanking] = useState(false);
@@ -180,6 +95,7 @@ export default function RRHH() {
   });
   const [rankingData, setRankingData] = useState(null);
   const [cargandoRanking, setCargandoRanking] = useState(false);
+  const [errorRanking, setErrorRanking] = useState(null);
 
   // ===========================================================================
   // Asistencia functions
@@ -200,63 +116,6 @@ export default function RRHH() {
       setDetalleEmpleado(data);
     } catch { setDetalleEmpleado(null); toast.error('Error al cargar detalle'); }
     finally { setCargandoDetalle(false); }
-  };
-
-  // ===========================================================================
-  // Comisiones functions
-  // ===========================================================================
-  const cargarRangos = async () => {
-    setCargandoRangos(true);
-    try {
-      const { data } = await api.get('/rrhh/rangos-comision');
-      setRangosComision(Array.isArray(data) ? data : []);
-    } catch { setRangosComision([]); }
-    finally { setCargandoRangos(false); }
-  };
-
-  const guardarRangos = async () => {
-    try {
-      const rangosLimpios = rangosEditados.map(r => ({
-        rango_desde: parseFloat(r.rango_desde),
-        rango_hasta: r.rango_hasta === '' || r.rango_hasta === null ? null : parseFloat(r.rango_hasta),
-        porcentaje: parseFloat(r.porcentaje),
-      }));
-      await api.post('/rrhh/rangos-comision', { rangos: rangosLimpios });
-      toast.success('Rangos de comision guardados');
-      setEditandoRangos(false);
-      cargarRangos();
-    } catch (err) { toast.error(err.response?.data?.error || 'Error al guardar rangos'); }
-  };
-
-  const cargarPreview = async (mes, anio, tipo, semana) => {
-    setCargandoPreview(true);
-    try {
-      const params = { mes, anio, tipo: tipo || tipoComision };
-      if ((tipo || tipoComision) === 'semanal') params.semana = semana || semanaComision;
-      const { data } = await api.get('/rrhh/comisiones/preview', { params });
-      setPreviewComisiones(data);
-    } catch (err) { toast.error(err.response?.data?.error || 'Error al cargar preview'); setPreviewComisiones(null); }
-    finally { setCargandoPreview(false); }
-  };
-
-  const guardarComisionesMes = async () => {
-    setGuardandoComisiones(true);
-    try {
-      await api.post('/rrhh/comisiones/guardar', { mes: mesComision.mes, anio: mesComision.anio });
-      toast.success('Comisiones guardadas exitosamente');
-      cargarPreview(mesComision.mes, mesComision.anio);
-      cargarHistorial();
-    } catch (err) { toast.error(err.response?.data?.error || 'Error al guardar'); }
-    finally { setGuardandoComisiones(false); }
-  };
-
-  const cargarHistorial = async () => {
-    setCargandoHistorial(true);
-    try {
-      const { data } = await api.get('/rrhh/comisiones');
-      setHistorialComisiones(Array.isArray(data) ? data : []);
-    } catch { setHistorialComisiones([]); }
-    finally { setCargandoHistorial(false); }
   };
 
   // ===========================================================================
@@ -295,11 +154,16 @@ export default function RRHH() {
 
   const cargarRankingData = async (mes, anio) => {
     setCargandoRanking(true);
+    setErrorRanking(null);
     try {
       const { data } = await api.get('/rrhh/ranking', { params: { mes, anio } });
       setRankingData(data);
-    } catch { setRankingData(null); }
-    finally { setCargandoRanking(false); }
+    } catch (err) {
+      // El motivo habitual es no tener esquema de comisiones activo: el ranking
+      // se apoya en el mismo filtro de ventas, así que sin esquema no hay base.
+      setErrorRanking(err.response?.data?.error || 'No se pudo calcular el ranking.');
+      setRankingData(null);
+    } finally { setCargandoRanking(false); }
   };
 
   // ===========================================================================
@@ -310,11 +174,6 @@ export default function RRHH() {
       cargarResumen(mesActual);
       setEmpleadoSeleccionado(null);
       setDetalleEmpleado(null);
-    }
-    if (tab === 'comisiones') {
-      cargarRangos();
-      cargarPreview(mesComision.mes, mesComision.anio, tipoComision, semanaComision);
-      cargarHistorial();
     }
     if (tab === 'ranking') {
       cargarConfigRanking();
@@ -330,12 +189,6 @@ export default function RRHH() {
       setDetalleEmpleado(null);
     }
   }, [mesActual]);
-
-  useEffect(() => {
-    if (tab === 'comisiones') {
-      cargarPreview(mesComision.mes, mesComision.anio, tipoComision, semanaComision);
-    }
-  }, [mesComision, tipoComision, semanaComision]);
 
   useEffect(() => {
     if (tab === 'ranking') {
@@ -358,13 +211,6 @@ export default function RRHH() {
   const mesLabel = () => {
     const [anio, mes] = mesActual.split('-').map(Number);
     return `${MESES[mes - 1]} ${anio}`;
-  };
-
-  const cambiarMesComision = (delta) => {
-    setMesComision(prev => {
-      const fecha = new Date(prev.anio, prev.mes - 1 + delta, 1);
-      return { mes: fecha.getMonth() + 1, anio: fecha.getFullYear() };
-    });
   };
 
   const cambiarMesRanking = (delta) => {
@@ -637,299 +483,9 @@ export default function RRHH() {
       )}
 
       {/* ================================================================= */}
-      {/* COMISIONES TAB                                                    */}
+      {/* COMISIONES TAB — liquidación con el esquema del Constructor       */}
       {/* ================================================================= */}
-      {tab === 'comisiones' && (
-        <div className="space-y-4">
-          {/* Banner informativo: condiciones para que un vendedor reciba comisiones */}
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <HiOutlineInformationCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 text-sm">
-                <h4 className="font-semibold text-blue-600 mb-2">Condiciones para que un vendedor reciba comisiones</h4>
-                <ul className="space-y-1.5 text-steel-300 list-disc list-inside">
-                  <li>
-                    El vendedor debe registrar como mínimo{' '}
-                    <span className="font-semibold text-steel-100">
-                      {previewComisiones?.min_ventas_comision ?? '—'} ventas
-                    </span>{' '}
-                    en el período evaluado (mes o semana).
-                  </li>
-                  <li>
-                    Solo cuentan las ventas con <span className="font-semibold text-steel-100">pago completo</span> y que <span className="font-semibold text-steel-100">no estén canceladas</span>.
-                  </li>
-                  <li>
-                    La comisión se calcula sobre la <span className="font-semibold text-steel-100">Ganancia Total</span> (Venta − Costo de productos − Flete − Parihuela − Regalos).
-                  </li>
-                  <li>
-                    El porcentaje aplicado se determina según el <span className="font-semibold text-steel-100">rango escalonado</span> configurado debajo, en función de la Ganancia Total acumulada del vendedor.
-                  </li>
-                  <li>
-                    Si el vendedor no alcanza el mínimo de ventas, su comisión del período será <span className="font-semibold text-steel-100">0</span> aunque tenga ganancia.
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          {/* Rangos de comision escalonada */}
-          <div className="card">
-            <div className="flex flex-col gap-3 mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-              <h3 className="text-sm font-semibold text-steel-100">Rangos de Comision Escalonada</h3>
-              {!editandoRangos ? (
-                <button onClick={() => { setRangosEditados(rangosComision.length > 0 ? rangosComision.map(r => ({ ...r })) : [{ rango_desde: 0, rango_hasta: 2500, porcentaje: 0 }]); setEditandoRangos(true); }} className="text-xs text-blue-600 hover:text-blue-700">Editar</button>
-              ) : (
-                <div className="flex gap-2">
-                  <button onClick={guardarRangos} className="text-xs bg-emerald-100 text-emerald-600 px-2 py-1 rounded hover:bg-emerald-200">Guardar</button>
-                  <button onClick={() => setEditandoRangos(false)} className="text-xs text-steel-400 hover:text-steel-200">Cancelar</button>
-                </div>
-              )}
-            </div>
-
-            {editandoRangos ? (
-              <div className="space-y-2">
-                {rangosEditados.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    <span className="text-steel-400 w-12">Desde</span>
-                    <input type="number" step="0.01" className="input-field w-28" value={r.rango_desde} onChange={e => { const arr = [...rangosEditados]; arr[i].rango_desde = e.target.value; setRangosEditados(arr); }} />
-                    <span className="text-steel-400 w-12">Hasta</span>
-                    <input type="number" step="0.01" className="input-field w-28" placeholder="Sin limite" value={r.rango_hasta ?? ''} onChange={e => { const arr = [...rangosEditados]; arr[i].rango_hasta = e.target.value; setRangosEditados(arr); }} />
-                    <span className="text-steel-400">=</span>
-                    <input type="number" step="0.01" className="input-field w-20" value={r.porcentaje} onChange={e => { const arr = [...rangosEditados]; arr[i].porcentaje = e.target.value; setRangosEditados(arr); }} />
-                    <span className="text-steel-400">%</span>
-                    <button onClick={() => setRangosEditados(rangosEditados.filter((_, idx) => idx !== i))} className="text-red-600 hover:text-red-700" title="Eliminar"><HiOutlineTrash className="w-4 h-4" /></button>
-                  </div>
-                ))}
-                <button onClick={() => setRangosEditados([...rangosEditados, { rango_desde: '', rango_hasta: '', porcentaje: '' }])} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 mt-1">
-                  <HiOutlinePlus className="w-3 h-3" /> Agregar rango
-                </button>
-              </div>
-            ) : cargandoRangos ? (
-              <div className="text-sm text-steel-400">Cargando...</div>
-            ) : rangosComision.length === 0 ? (
-              <p className="text-sm text-steel-500">No hay rangos configurados. Haz clic en Editar para configurar.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-steel-800"><th className="text-left py-2 px-3 text-steel-400">Desde</th><th className="text-left py-2 px-3 text-steel-400">Hasta</th><th className="text-left py-2 px-3 text-steel-400">%</th></tr></thead>
-                  <tbody>{rangosComision.map(r => (
-                    <tr key={r.id} className="border-b border-steel-800/30">
-                      <td className="py-2 px-3 text-steel-200">{formatearMoneda(r.rango_desde)}</td>
-                      <td className="py-2 px-3 text-steel-200">{r.rango_hasta ? formatearMoneda(r.rango_hasta) : 'Sin limite'}</td>
-                      <td className="py-2 px-3 text-primary-600 font-bold">{r.porcentaje}%</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Selector de mes + tipo (mensual/semanal) */}
-          <div className="card">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-3">
-                <button onClick={() => cambiarMesComision(-1)} className="p-2 rounded-lg bg-steel-800 hover:bg-steel-700 text-steel-300">
-                  <HiOutlineChevronLeft className="w-5 h-5" />
-                </button>
-                <h2 className="text-lg font-semibold text-steel-100 min-w-[180px] text-center">
-                  {MESES[mesComision.mes - 1]} {mesComision.anio}
-                </h2>
-                <button onClick={() => cambiarMesComision(1)} className="p-2 rounded-lg bg-steel-800 hover:bg-steel-700 text-steel-300">
-                  <HiOutlineChevronRight className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="flex rounded-lg overflow-hidden border border-steel-700">
-                  <button onClick={() => setTipoComision('mensual')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${tipoComision === 'mensual' ? 'bg-primary-600 text-white' : 'bg-steel-800 text-steel-400 hover:text-steel-200'}`}>
-                    Mensual
-                  </button>
-                  <button onClick={() => setTipoComision('semanal')} className={`px-3 py-1.5 text-xs font-medium transition-colors ${tipoComision === 'semanal' ? 'bg-primary-600 text-white' : 'bg-steel-800 text-steel-400 hover:text-steel-200'}`}>
-                    Semanal
-                  </button>
-                </div>
-                {tipoComision === 'semanal' && previewComisiones?.semanas_disponibles?.length > 0 && (
-                  <select className="input-field text-xs py-1.5 w-auto" value={semanaComision} onChange={e => setSemanaComision(parseInt(e.target.value))}>
-                    {previewComisiones.semanas_disponibles.map(s => (
-                      <option key={s.numero} value={s.numero}>
-                        Sem {s.numero} ({formatearFecha(s.inicio)} - {formatearFecha(s.fin)})
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <button onClick={() => cargarPreview(mesComision.mes, mesComision.anio)} className="text-xs bg-steel-800 text-steel-300 px-2 py-1.5 rounded hover:bg-steel-700 flex items-center gap-1">
-                  <HiOutlineRefresh className="w-3.5 h-3.5" /> Recalcular
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {tipoComision === 'mensual' && (
-                  <button onClick={guardarComisionesMes} disabled={guardandoComisiones || !previewComisiones?.detalles?.length} className="btn-primary flex items-center gap-2 disabled:opacity-50">
-                    {guardandoComisiones ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <HiOutlineSave className="w-4 h-4" />}
-                    Guardar Comisiones
-                  </button>
-                )}
-                <button onClick={exportarComisionesExcel} disabled={!previewComisiones?.detalles?.length} className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors">
-                  <HiOutlineDownload className="w-4 h-4" /> Exportar Excel
-                </button>
-              </div>
-            </div>
-
-            {previewComisiones?.guardado && tipoComision === 'mensual' && (
-              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-4 text-sm">
-                <span className="text-blue-600 font-medium">Este mes ya fue guardado</span>
-                <span className="text-blue-400 ml-2">
-                  por {previewComisiones.guardado.guardado_por || '?'} el {formatearFechaHoraPrecisa(previewComisiones.guardado.guardado_en)}
-                </span>
-                <span className="text-blue-400 ml-1">— Al guardar nuevamente se recalculara.</span>
-              </div>
-            )}
-
-            {cargandoPreview ? (
-              <div className="text-center py-8 text-steel-400">Calculando comisiones...</div>
-            ) : !previewComisiones?.detalles?.length ? (
-              <div className="text-center py-8 text-steel-500">
-                No hay ventas para {tipoComision === 'semanal' ? `Semana ${semanaComision} de ` : ''}{MESES[mesComision.mes - 1]} {mesComision.anio}.
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {previewComisiones.detalles.map((vendedor, vi) => (
-                  <div key={vi} className="border border-steel-700/50 rounded-lg overflow-hidden">
-                    {/* Cabecera del vendedor (clickeable para expandir/colapsar) */}
-                    <button
-                      type="button"
-                      onClick={() => setVendedoresExpandidos((prev) => ({ ...prev, [vi]: !prev[vi] }))}
-                      className="w-full bg-steel-800/60 px-4 py-2.5 flex items-center justify-between hover:bg-steel-700/60 transition-colors cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2">
-                        <HiOutlineChevronDown className={`w-4 h-4 text-steel-400 transition-transform ${vendedoresExpandidos[vi] ? '' : '-rotate-90'}`} />
-                        <h4 className="text-sm font-bold text-steel-100">{vendedor.vendedor_nombre}</h4>
-                        {!vendedor.totales.cumple_minimo_ventas && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary-600 text-white font-extrabold uppercase tracking-wider">Sin minimo</span>
-                        )}
-                      </div>
-                      <span className="text-xs text-steel-400">{vendedor.totales.cantidad_ventas} venta{vendedor.totales.cantidad_ventas !== 1 ? 's' : ''}</span>
-                    </button>
-
-                    {/* Tabla de ventas individuales (colapsable) */}
-                    {vendedoresExpandidos[vi] && <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-steel-800 bg-steel-900/40">
-                            <th className="text-left py-2 px-2 text-steel-400 font-medium">Fecha</th>
-                            <th className="text-left py-2 px-2 text-steel-400 font-medium">Cliente</th>
-                            <th className="text-left py-2 px-2 text-steel-400 font-medium">Producto</th>
-                            <th className="text-left py-2 px-2 text-steel-400 font-medium">Destino</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Venta</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Costo</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Flete</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Parihuela</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Regalos</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Costo Total</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">Ganancia</th>
-                            <th className="text-right py-2 px-2 text-steel-400 font-medium">% Margen</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {vendedor.ventas.map((v, i) => (
-                            <tr key={i} className="border-b border-steel-800/30 hover:bg-steel-800/20">
-                              <td className="py-1.5 px-2 text-steel-300 whitespace-nowrap">{formatearFecha(v.fecha)}</td>
-                              <td className="py-1.5 px-2 text-steel-200 max-w-[120px] truncate" title={v.cliente}>{v.cliente}</td>
-                              <td className="py-1.5 px-2 text-steel-200 max-w-[160px] truncate" title={v.productos}>{v.productos}</td>
-                              <td className="py-1.5 px-2 text-steel-300 max-w-[100px] truncate" title={v.destino}>{v.destino}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-200">{formatearMoneda(v.monto_venta)}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-400">{formatearMoneda(v.costo_productos)}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-400">{formatearMoneda(v.costo_flete)}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-400">{formatearMoneda(v.costo_parihuela)}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-400">{formatearMoneda(v.costo_regalos)}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-300">{formatearMoneda(v.costo_total)}</td>
-                              <td className={`py-1.5 px-2 text-right font-medium ${v.ganancia >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatearMoneda(v.ganancia)}</td>
-                              <td className="py-1.5 px-2 text-right text-steel-300">{(v.margen * 100).toFixed(1)}%</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        {/* Fila de totales */}
-                        <tfoot>
-                          <tr className="border-t-2 border-steel-600 bg-steel-900/60">
-                            <td colSpan={4} className="py-2 px-2 font-bold text-steel-100 text-xs">TOTALES</td>
-                            <td className="py-2 px-2 text-right font-bold text-steel-100">{formatearMoneda(vendedor.totales.venta_bruta)}</td>
-                            <td className="py-2 px-2 text-right font-medium text-steel-300">{formatearMoneda(vendedor.totales.costo_productos)}</td>
-                            <td className="py-2 px-2 text-right font-medium text-steel-300">{formatearMoneda(vendedor.totales.costo_flete_total)}</td>
-                            <td className="py-2 px-2 text-right font-medium text-steel-300">{formatearMoneda(vendedor.totales.costo_parihuela_total)}</td>
-                            <td className="py-2 px-2 text-right font-medium text-steel-300">{formatearMoneda(vendedor.totales.costo_regalos_total)}</td>
-                            <td className="py-2 px-2 text-right font-bold text-steel-200">{formatearMoneda(vendedor.totales.costo_total)}</td>
-                            <td className={`py-2 px-2 text-right font-bold ${vendedor.totales.ganancia_total >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{formatearMoneda(vendedor.totales.ganancia_total)}</td>
-                            <td className="py-2 px-2 text-right font-medium text-steel-300">{(vendedor.totales.margen_total * 100).toFixed(1)}%</td>
-                          </tr>
-                          <tr className="bg-steel-900/60">
-                            <td colSpan={10} className="py-2 px-2 text-right text-xs font-semibold text-steel-300">
-                              GANANCIA TOTAL: <span className="text-emerald-600">{formatearMoneda(vendedor.totales.ganancia_total)}</span>
-                              <span className="mx-3 text-steel-600">|</span>
-                              Comision ({vendedor.totales.porcentaje_aplicado}%):
-                            </td>
-                            <td colSpan={2} className="py-2 px-2 text-right font-bold text-primary-500 text-sm">
-                              {formatearMoneda(vendedor.totales.comision_total)}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>}
-                  </div>
-                ))}
-
-                {/* Resumen general */}
-                <div className="bg-steel-800/40 border border-steel-700/50 rounded-lg p-4 flex items-center justify-between">
-                  <div className="text-sm text-steel-300">
-                    <span className="font-medium text-steel-100">{previewComisiones.detalles.length}</span> vendedor{previewComisiones.detalles.length !== 1 ? 'es' : ''}
-                    <span className="mx-2 text-steel-600">|</span>
-                    Ganancia total: <span className="font-bold text-emerald-600">{formatearMoneda(previewComisiones.total_ganancia)}</span>
-                  </div>
-                  <div className="text-sm">
-                    Total comisiones: <span className="font-bold text-primary-500 text-lg">{formatearMoneda(previewComisiones.total_comisiones)}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Historial de comisiones guardadas */}
-          <div className="card">
-            <h3 className="text-sm font-semibold text-steel-100 mb-3">Historial de Comisiones Guardadas</h3>
-            {cargandoHistorial ? (
-              <div className="text-sm text-steel-400">Cargando...</div>
-            ) : historialComisiones.length === 0 ? (
-              <p className="text-sm text-steel-500">No hay comisiones guardadas aun.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-steel-800">
-                      <th className="text-left py-2 px-3 text-steel-400">Periodo</th>
-                      <th className="text-right py-2 px-3 text-steel-400">Utilidad Total</th>
-                      <th className="text-right py-2 px-3 text-steel-400">Comisiones Total</th>
-                      <th className="text-center py-2 px-3 text-steel-400">Vendedores</th>
-                      <th className="text-left py-2 px-3 text-steel-400">Guardado por</th>
-                      <th className="text-left py-2 px-3 text-steel-400">Fecha</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historialComisiones.map(h => (
-                      <tr key={h.id} className="border-b border-steel-800/30">
-                        <td className="py-2 px-3 text-steel-100 font-medium">{MESES[h.mes - 1]} {h.anio}</td>
-                        <td className="py-2 px-3 text-right text-emerald-600">{formatearMoneda(h.total_utilidad)}</td>
-                        <td className="py-2 px-3 text-right text-primary-600 font-bold">{formatearMoneda(h.total_comisiones)}</td>
-                        <td className="py-2 px-3 text-center text-steel-300">{h.detalles?.length || 0}</td>
-                        <td className="py-2 px-3 text-steel-300">{h.tbl_usuarios?.nombres || '-'}</td>
-                        <td className="py-2 px-3 text-steel-400">{formatearFechaHoraPrecisa(h.guardado_en)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {tab === 'comisiones' && <LiquidacionComisiones />}
 
       {/* ================================================================= */}
       {/* RANKING TAB                                                       */}
@@ -941,16 +497,17 @@ export default function RRHH() {
           {/* Configuracion de pesos */}
           <div className="card">
             <div className="flex flex-col gap-3 mb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-              <h3 className="text-sm font-semibold text-steel-100">Pesos del Ranking (deben sumar 100%)</h3>
+              <div>
+                <h3 className="text-sm font-semibold text-steel-100">Pesos del Ranking (deben sumar 100%)</h3>
+                <p className="text-xs text-steel-400 mt-0.5">
+                  Cuánto vendió y a cuántos clientes distintos le vendió, mitad y mitad.
+                </p>
+              </div>
               {!editandoRanking ? (
                 <button onClick={() => {
-                  const defaultMetricas = [
-                    { metrica: 'venta_bruta', peso: 30 },
-                    { metrica: 'utilidad', peso: 30 },
-                    { metrica: 'unidades', peso: 20 },
-                    { metrica: 'margen', peso: 20 },
-                  ];
-                  setRankingEditado(configRanking.length > 0 ? configRanking.map(r => ({ metrica: r.metrica, peso: parseFloat(r.peso) })) : defaultMetricas);
+                  setRankingEditado(configRanking.length > 0
+                    ? configRanking.map(r => ({ metrica: r.metrica, peso: parseFloat(r.peso) }))
+                    : METRICAS_RANKING.map(m => ({ metrica: m.key, peso: m.peso_defecto })));
                   setEditandoRanking(true);
                 }} className="text-xs text-blue-600 hover:text-blue-700">Editar</button>
               ) : (
@@ -962,10 +519,10 @@ export default function RRHH() {
             </div>
 
             {editandoRanking ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {rankingEditado.map((r, i) => (
                   <div key={r.metrica} className="bg-steel-900/50 rounded-lg p-3">
-                    <label className="block text-xs text-steel-400 mb-1 capitalize">{r.metrica.replace(/_/g, ' ')}</label>
+                    <label className="block text-xs text-steel-400 mb-1">{etiquetaMetricaRanking(r.metrica)}</label>
                     <div className="flex items-center gap-1">
                       <input type="number" step="1" min="0" max="100" className="input-field w-20 text-sm" value={r.peso} onChange={e => { const arr = [...rankingEditado]; arr[i].peso = e.target.value; setRankingEditado(arr); }} />
                       <span className="text-sm text-steel-400">%</span>
@@ -981,10 +538,10 @@ export default function RRHH() {
             ) : configRanking.length === 0 ? (
               <p className="text-sm text-steel-500">No hay configuracion de ranking. Haz clic en Editar.</p>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {configRanking.map(r => (
                   <div key={r.metrica} className="bg-steel-900/50 rounded-lg p-3 text-center">
-                    <div className="text-xs text-steel-400 capitalize">{r.metrica.replace(/_/g, ' ')}</div>
+                    <div className="text-xs text-steel-400">{etiquetaMetricaRanking(r.metrica)}</div>
                     <div className="text-xl font-bold text-primary-600">{r.peso}%</div>
                   </div>
                 ))}
@@ -1023,6 +580,8 @@ export default function RRHH() {
 
             {cargandoRanking ? (
               <div className="text-center py-8 text-steel-400">Calculando ranking...</div>
+            ) : errorRanking ? (
+              <div className="text-center py-8 text-amber-600 text-sm">{errorRanking}</div>
             ) : !rankingData?.ranking?.length ? (
               <div className="text-center py-8 text-steel-500">No hay datos de ranking para este mes.</div>
             ) : (
@@ -1033,9 +592,8 @@ export default function RRHH() {
                       <th className="text-center py-2 px-2 text-steel-400 w-12">#</th>
                       <th className="text-left py-2 px-2 text-steel-400">Vendedor</th>
                       <th className="text-right py-2 px-2 text-steel-400">Venta Bruta</th>
-                      <th className="text-right py-2 px-2 text-steel-400">Utilidad</th>
-                      <th className="text-center py-2 px-2 text-steel-400">Unidades</th>
-                      <th className="text-right py-2 px-2 text-steel-400">Margen</th>
+                      <th className="text-center py-2 px-2 text-steel-400">Clientes</th>
+                      <th className="text-center py-2 px-2 text-steel-400">Operaciones</th>
                       <th className="text-right py-2 px-2 text-primary-600 font-semibold">Puntaje</th>
                     </tr>
                   </thead>
@@ -1049,10 +607,9 @@ export default function RRHH() {
                         </td>
                         <td className="py-2 px-2 text-steel-100 font-medium">{r.vendedor_nombre}</td>
                         <td className="py-2 px-2 text-right text-steel-200">{formatearMoneda(r.venta_bruta)}</td>
-                        <td className="py-2 px-2 text-right text-emerald-600">{formatearMoneda(r.utilidad_total)}</td>
-                        <td className="py-2 px-2 text-center text-steel-300">{r.cantidad_productos}</td>
-                        <td className="py-2 px-2 text-right text-steel-300">{(parseFloat(r.margen) * 100).toFixed(1)}%</td>
-                        <td className="py-2 px-2 text-right text-primary-600 font-bold">{parseFloat(r.puntaje_total).toFixed(2)}</td>
+                        <td className="py-2 px-2 text-center text-steel-200">{r.clientes}</td>
+                        <td className="py-2 px-2 text-center text-steel-400">{r.num_operaciones}</td>
+                        <td className="py-2 px-2 text-right text-primary-600 font-bold">{parseFloat(r.puntaje_total).toFixed(3)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1062,6 +619,11 @@ export default function RRHH() {
                     Meta del mes: <span className="text-primary-600 font-medium">{formatearMoneda(rankingData.meta_ventas)}</span>
                   </div>
                 )}
+                <p className="mt-3 text-xs text-steel-500">
+                  El puntaje es la participación del vendedor sobre el total del equipo, ponderada con los pesos de
+                  arriba. Cuentan las mismas ventas que usa la liquidación de comisiones
+                  {rankingData.esquema?.nombre ? ` (esquema ${rankingData.esquema.nombre})` : ''}.
+                </p>
               </div>
             )}
           </div>

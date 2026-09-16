@@ -58,7 +58,7 @@ import ConfigSupervision from '../pages/supervision/ConfigSupervision';
 import DashboardVendedor from '../pages/vendedor/Dashboard';
 import VentasVendedor from '../pages/vendedor/VentasVendedor';
 import ClientesVendedor from '../pages/vendedor/ClientesVendedor';
-import BancoFotosVendedor from '../pages/vendedor/BancoFotos';
+import BancoFotos from '../pages/vendedor/BancoFotos';
 import Cotizaciones from '../pages/vendedor/Cotizaciones';
 import Prospectos from '../pages/vendedor/Prospectos';
 import InventarioVendedor from '../pages/vendedor/InventarioVendedor';
@@ -68,7 +68,7 @@ import ComisionesVendedor from '../pages/vendedor/ComisionesVendedor';
 // Almacén
 import DashboardAlmacen from '../pages/almacen/Dashboard';
 import Despacho from '../pages/almacen/Despacho';
-import BancoFotosAlmacen from '../pages/almacen/BancoFotosAlmacen';
+import ContraEntregas from '../pages/almacen/ContraEntregas';
 import InventarioAlmacen from '../pages/almacen/InventarioAlmacen';
 import RecepcionCompras from '../pages/almacen/RecepcionCompras';
 import RecepcionImportaciones from '../pages/almacen/RecepcionImportaciones';
@@ -138,6 +138,7 @@ export default function AppRoutes() {
           <Route path="/administrador/rrhh" element={<RRHHAdmin />} />
           <Route path="/administrador/reportes" element={<ReportesAdmin />} />
           <Route path="/administrador/almacenes" element={<AlmacenesAdmin />} />
+          <Route path="/administrador/banco-fotos" element={<BancoFotos />} />
           <Route path="/administrador/config-facturacion" element={<ConfigFacturacion />} />
         </Route>
       </Route>
@@ -171,7 +172,7 @@ export default function AppRoutes() {
           <Route path="/vendedor/ventas" element={<VentasVendedor />} />
           <Route path="/vendedor/clientes" element={<ClientesVendedor />} />
           <Route path="/vendedor/clientes/:id" element={<ClienteDetalle360 />} />
-          <Route path="/vendedor/banco-fotos" element={<BancoFotosVendedor />} />
+          <Route path="/vendedor/banco-fotos" element={<BancoFotos />} />
           <Route path="/vendedor/cotizaciones" element={<Cotizaciones />} />
           <Route path="/vendedor/prospectos" element={<Prospectos />} />
           <Route path="/vendedor/inventario" element={<InventarioVendedor />} />
@@ -186,10 +187,11 @@ export default function AppRoutes() {
           <Route path="/almacen/dashboard" element={<DashboardAlmacen />} />
           <Route path="/almacen/despacho" element={<Despacho />} />
           <Route path="/almacen/entregas" element={<Entregas />} />
+          <Route path="/almacen/contra-entregas" element={<ContraEntregas />} />
           <Route path="/almacen/escaner-salida" element={<EscanerSalida />} />
           <Route path="/almacen/recepcion" element={<RecepcionCompras />} />
           <Route path="/almacen/recepcion-importaciones" element={<RecepcionImportaciones />} />
-          <Route path="/almacen/banco-fotos" element={<BancoFotosAlmacen />} />
+          <Route path="/almacen/banco-fotos" element={<BancoFotos />} />
           <Route path="/almacen/inventario" element={<InventarioAlmacen />} />
         </Route>
       </Route>

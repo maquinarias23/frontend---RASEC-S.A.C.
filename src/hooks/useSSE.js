@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react';
 import useNotificacionesStore from '../store/notificacionesStore';
 import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+import { API_URL } from '../config/apiUrl';
 
 export default function useSSE() {
   const token = useAuthStore(state => state.token);

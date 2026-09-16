@@ -7,6 +7,7 @@ import TarjetaResumen from '../../components/ui/TarjetaResumen';
 import Modal from '../../components/ui/Modal';
 import Paginacion from '../../components/ui/Paginacion';
 import DateRangePicker from '../../components/ui/DateRangePicker';
+import BotonesExportar from '../../components/ui/BotonesExportar';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
@@ -68,6 +69,57 @@ export default function Caja() {
     api.get('/caja/resumen', { params }).then(r => setResumen(r.data)).catch(() => {});
   }, [datos, fechas.fechaInicio, fechas.fechaFin]);
 
+  // Totales del periodo exportado: se recalculan sobre datosFiltrados —no sobre
+  // el resumen del backend— para que el Excel cuadre exactamente con las filas
+  // que se estan exportando.
+  const totalesExportacion = datosFiltrados.reduce((acc, m) => {
+    const monto = Math.abs(Number(m.monto) || 0);
+    if (m.tipo === 'ingreso') acc.ingresos += monto;
+    else acc.gastos += monto;
+    return acc;
+  }, { ingresos: 0, gastos: 0 });
+
+  // Se calcula en el clic (no en cada render) con lo que hay en pantalla.
+  const reporteCaja = () => ({
+    archivo: 'Flujo_de_Caja',
+    titulo: 'Flujo de Caja',
+    filtros: [
+      { etiqueta: 'Desde', valor: fechas.fechaInicio },
+      { etiqueta: 'Hasta', valor: fechas.fechaFin },
+    ],
+    secciones: [
+      {
+        titulo: 'Resumen',
+        columnas: [
+          { header: 'Concepto', valor: 'concepto', ancho: 22 },
+          { header: 'Monto (S/)', valor: 'monto', tipo: 'moneda', ancho: 16 },
+        ],
+        filas: [
+          { concepto: 'Total Ingresos', monto: totalesExportacion.ingresos },
+          { concepto: 'Total Gastos', monto: totalesExportacion.gastos },
+          { concepto: 'Balance', monto: totalesExportacion.ingresos - totalesExportacion.gastos },
+        ],
+      },
+      {
+        titulo: 'Movimientos',
+        totales: true,
+        // Ingreso y gasto van en columnas separadas: asi la fila de totales del
+        // pie suma cada uno por su lado en vez de mezclarlos en una sola cifra.
+        columnas: [
+          { header: 'ID', valor: 'id', tipo: 'numero', sinTotal: true, ancho: 8 },
+          { header: 'Tipo', valor: (m) => m.tipo?.toUpperCase() || '', ancho: 12 },
+          { header: 'Origen', valor: (m) => m.origen?.replace(/_/g, ' ') || '', ancho: 18 },
+          { header: 'Categoria', valor: (m) => m.tbl_categorias_gasto?.nombre || '', ancho: 20 },
+          { header: 'Ingreso', valor: (m) => (m.tipo === 'ingreso' ? Math.abs(Number(m.monto) || 0) : 0), tipo: 'moneda', ancho: 14 },
+          { header: 'Gasto', valor: (m) => (m.tipo === 'ingreso' ? 0 : Math.abs(Number(m.monto) || 0)), tipo: 'moneda', ancho: 14 },
+          { header: 'Descripcion', valor: (m) => m.descripcion || '', ancho: 45 },
+          { header: 'Fecha', valor: (m) => formatearFechaHora(m.fecha_hora), ancho: 22 },
+        ],
+        filas: datosFiltrados,
+      },
+    ],
+  });
+
   const guardarGasto = async (e) => {
     e.preventDefault();
     try {
@@ -103,9 +155,16 @@ export default function Caja() {
     <div>
       <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
         <h1 className="text-2xl font-bold font-display tracking-wider text-steel-100">Flujo de Caja</h1>
-        <button onClick={() => { setForm({ monto: '', categoria_id: '', descripcion: '' }); setModal(true); }} className="btn-primary flex items-center gap-2">
-          <HiOutlinePlus className="w-4 h-4" /> Registrar Gasto
-        </button>
+        <div className="flex items-center gap-2">
+          <BotonesExportar
+            formatos={['excel']}
+            deshabilitado={cargando || datosFiltrados.length === 0}
+            reporte={reporteCaja}
+          />
+          <button onClick={() => { setForm({ monto: '', categoria_id: '', descripcion: '' }); setModal(true); }} className="btn-primary flex items-center gap-2">
+            <HiOutlinePlus className="w-4 h-4" /> Registrar Gasto
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">

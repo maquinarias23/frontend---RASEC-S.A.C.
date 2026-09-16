@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { HiOutlineEye, HiOutlineGift } from 'react-icons/hi';
+import { HiOutlineEye, HiOutlineGift, HiOutlineCheckCircle } from 'react-icons/hi';
+import toast from 'react-hot-toast';
+import api from '../../api/axios';
 import useCrud from '../../hooks/useCrud';
 import TablaGenerica from '../../components/ui/TablaGenerica';
 import EstadoBadge from '../../components/ui/EstadoBadge';
 import Modal from '../../components/ui/Modal';
 import TotalizadorVenta from '../../components/shared/TotalizadorVenta';
 import { formatearMoneda, formatearFechaHora } from '../../utils/formato';
-import { ESTADO_VENTA, TIPO_ENTREGA } from '../../config/constants';
+import { ESTADO_VENTA, TIPO_ENTREGA, TIPO_ENTREGA_LABEL } from '../../config/constants';
 
 const columnas = [
   { key: 'id', label: 'N° Venta' },
@@ -19,8 +21,27 @@ const columnas = [
 ];
 
 export default function VentasSupervision() {
-  const { datos, cargando } = useCrud('/ventas');
+  const { datos, cargando, listar } = useCrud('/ventas');
   const [detalle, setDetalle] = useState(null);
+  const [aprobandoSinAdelanto, setAprobandoSinAdelanto] = useState(false);
+
+  // Supervisión también autoriza la salida de una contra-entrega sin adelanto:
+  // es quien conoce al cliente y asume el riesgo de despachar antes de cobrar.
+  const aprobarSinAdelanto = async () => {
+    if (!detalle || aprobandoSinAdelanto) return;
+    setAprobandoSinAdelanto(true);
+    try {
+      const { data: res } = await api.post(`/ventas/${detalle.id}/aprobar-sin-adelanto`);
+      toast.success(res.mensaje || 'Salida autorizada sin adelanto');
+      const { data } = await api.get(`/ventas/${detalle.id}`);
+      setDetalle(data);
+      listar();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al autorizar la salida');
+    } finally {
+      setAprobandoSinAdelanto(false);
+    }
+  };
 
   return (
     <div>
@@ -50,7 +71,7 @@ export default function VentasSupervision() {
               <div><span className="text-steel-400 block text-xs mb-0.5">Estado Tracking</span><EstadoBadge estado={detalle.estado_tracking} /></div>
               <div>
                 <span className="text-steel-400 block text-xs mb-0.5">Tipo Entrega</span>
-                <span className="text-steel-100">{detalle.tipo_entrega?.replace(/_/g, ' ').toUpperCase()}</span>
+                <span className="text-steel-100">{TIPO_ENTREGA_LABEL[detalle.tipo_entrega] || detalle.tipo_entrega?.replace(/_/g, ' ')}</span>
                 {detalle.tbl_transportistas && (
                   <span className="block text-xs text-primary-600 mt-0.5 font-medium">{detalle.tbl_transportistas.nombre}</span>
                 )}
@@ -118,6 +139,35 @@ export default function VentasSupervision() {
             {/* Totales */}
             <TotalizadorVenta venta={detalle} />
 
+            {/* Contra-entrega pendiente: autorizar la salida sin adelanto */}
+            {detalle.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA
+              && detalle.estado_venta === ESTADO_VENTA.PENDIENTE_APROBACION && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                <p className="text-amber-600 text-sm font-medium">Venta a contra-entrega</p>
+                <p className="text-steel-300 text-xs mt-1">
+                  El cliente paga {formatearMoneda(detalle.total)} al recibir el pedido. Al autorizar, el
+                  pedido puede salir del almacén sin adelanto; el motorizado entregará solo cuando el
+                  abono esté registrado y aprobado.
+                </p>
+                <button
+                  onClick={aprobarSinAdelanto}
+                  disabled={aprobandoSinAdelanto}
+                  className="mt-3 px-4 py-2 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <HiOutlineCheckCircle className="w-5 h-5" />
+                  {aprobandoSinAdelanto ? 'Autorizando...' : 'Autorizar salida sin adelanto'}
+                </button>
+              </div>
+            )}
+
+            {detalle.aprobada_sin_adelanto && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">
+                <span className="text-amber-600 text-xs font-semibold block mb-1">Salida autorizada sin adelanto</span>
+                <p className="text-steel-200 text-sm">
+                  {detalle.tbl_aprobador_sin_adelanto?.nombres || 'Usuario'} — {formatearFechaHora(detalle.fecha_aprobacion_sin_adelanto)}
+                </p>
+              </div>
+            )}
 
             {/* Motivo cancelacion */}
             {detalle.estado_venta === ESTADO_VENTA.CANCELADA && detalle.motivo_cancelacion && (

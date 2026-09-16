@@ -18,7 +18,7 @@ import {
   HiOutlineExternalLink,
   HiOutlineDocumentDownload,
 } from 'react-icons/hi';
-import { ESTADO_COTIZACION, ORIGEN_COTIZACION, TIPO_ENTREGA, TIPO_DESTINO, TELEFONO_INPUT, COTIZACION_EXPORT } from '../../config/constants';
+import { ESTADO_COTIZACION, ORIGEN_COTIZACION, TIPO_ENTREGA, TIPO_ENTREGA_LABEL, TIPOS_ENTREGA_CON_DESTINO, filtrarDepartamentosContraEntrega, filtrarProvinciasContraEntrega, MSG_CONTRA_ENTREGA_ZONA, TIPO_DESTINO, TELEFONO_INPUT, COTIZACION_EXPORT } from '../../config/constants';
 import { obtenerDepartamentos, obtenerProvincias, obtenerDistritos } from '../../services/ubigeoService';
 import useCrud from '../../hooks/useCrud';
 import usePaginacion from '../../hooks/usePaginacion';
@@ -239,6 +239,7 @@ export default function Cotizaciones() {
   const [cotizacionConvertir, setCotizacionConvertir] = useState(null);
   const [formConvertir, setFormConvertir] = useState({
     tipo_entrega: TIPO_ENTREGA.ENVIO_POR_AGENCIA,
+    direccion_manual: '',
     transportista_id: '',
     tipo_destino: TIPO_DESTINO.LIMA,
     departamento_id: '',
@@ -412,6 +413,7 @@ export default function Cotizaciones() {
     setCotizacionConvertir(cotizacion);
     setFormConvertir({
       tipo_entrega: TIPO_ENTREGA.ENVIO_POR_AGENCIA,
+    direccion_manual: '',
       transportista_id: '',
       tipo_destino: TIPO_DESTINO.LIMA,
       departamento_id: '',
@@ -472,6 +474,25 @@ export default function Cotizaciones() {
       setDistritos([]);
     }
   };
+
+  // ---- Zona de la contra-entrega: Lima Metropolitana y Callao ----
+  // El motorizado no sale de la ciudad; los selectores solo ofrecen lo que
+  // puede cubrir. El backend valida lo mismo.
+  const esContraEntregaConv = formConvertir.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA;
+  const departamentosConvertir = esContraEntregaConv
+    ? filtrarDepartamentosContraEntrega(departamentos)
+    : departamentos;
+  const provinciasConvertir = esContraEntregaConv
+    ? filtrarProvinciasContraEntrega(provincias)
+    : provincias;
+
+  // Lima y Callao tienen una sola provincia válida cada uno: se elige sola.
+  useEffect(() => {
+    if (!esContraEntregaConv) return;
+    if (provinciasConvertir.length !== 1) return;
+    const unica = String(provinciasConvertir[0].id);
+    if (String(formConvertir.provincia_id) !== unica) handleProvinciaChange(unica);
+  }, [esContraEntregaConv, provinciasConvertir, formConvertir.provincia_id]);
 
   // =========================================================================
   // Funciones de edicion de items
@@ -536,14 +557,22 @@ export default function Cotizaciones() {
         return;
       }
     }
-    if (formConvertir.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA) {
-      if (!formConvertir.transportista_id) {
-        toast.error('Selecciona la agencia transportista');
-        return;
-      }
+    if (formConvertir.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && !formConvertir.transportista_id) {
+      toast.error('Selecciona la agencia transportista');
+      return;
+    }
+    if (TIPOS_ENTREGA_CON_DESTINO.includes(formConvertir.tipo_entrega)) {
       if (!formConvertir.departamento_id || !formConvertir.provincia_id || !formConvertir.distrito_id) {
         toast.error('Selecciona departamento, provincia y distrito');
         return;
+      }
+      if (formConvertir.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA) {
+        if (!(formConvertir.direccion_manual || '').trim()) {
+          toast.error('Indica la dirección exacta donde el motorizado hará la entrega');
+          return;
+        }
+        const provinciaOk = provinciasConvertir.some((p) => String(p.id) === String(formConvertir.provincia_id));
+        if (!provinciaOk) { toast.error(MSG_CONTRA_ENTREGA_ZONA); return; }
       }
     }
     const montoInicial = parseFloat(formConvertir.monto_inicial);
@@ -593,9 +622,14 @@ export default function Cotizaciones() {
       formData.append('tipo_destino', formConvertir.tipo_destino);
       if (formConvertir.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA) {
         formData.append('transportista_id', formConvertir.transportista_id);
+      }
+      if (TIPOS_ENTREGA_CON_DESTINO.includes(formConvertir.tipo_entrega)) {
         formData.append('departamento_id', formConvertir.departamento_id);
         formData.append('provincia_id', formConvertir.provincia_id);
         formData.append('distrito_id', formConvertir.distrito_id);
+        if ((formConvertir.direccion_manual || '').trim()) {
+          formData.append('direccion_manual', formConvertir.direccion_manual.trim());
+        }
       }
       formData.append('monto_inicial', formConvertir.monto_inicial);
       formData.append('boucher', boucherFile);
@@ -1113,16 +1147,19 @@ export default function Cotizaciones() {
                   departamento_id: '',
                   provincia_id: '',
                   distrito_id: '',
+                  direccion_manual: '',
                 })}
                 disabled={convirtiendo}
               >
-                <option value={TIPO_ENTREGA.ENVIO_POR_AGENCIA}>Envio por Agencia</option>
-                <option value={TIPO_ENTREGA.RETIRO_EN_TIENDA}>Retiro en Tienda</option>
+                <option value={TIPO_ENTREGA.ENVIO_POR_AGENCIA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.ENVIO_POR_AGENCIA]}</option>
+                <option value={TIPO_ENTREGA.RETIRO_EN_TIENDA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.RETIRO_EN_TIENDA]}</option>
+                <option value={TIPO_ENTREGA.CONTRA_ENTREGA}>{TIPO_ENTREGA_LABEL[TIPO_ENTREGA.CONTRA_ENTREGA]}</option>
               </select>
             </div>
 
-            {formConvertir.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && (
+            {TIPOS_ENTREGA_CON_DESTINO.includes(formConvertir.tipo_entrega) && (
               <>
+                {formConvertir.tipo_entrega === TIPO_ENTREGA.ENVIO_POR_AGENCIA && (
                 <div>
                   <label className="block text-sm font-medium text-steel-200 mb-1">
                     Agencia Transportista <span className="text-red-600">*</span>
@@ -1140,6 +1177,7 @@ export default function Cotizaciones() {
                     ))}
                   </select>
                 </div>
+                )}
 
                 {/* Tipo de destino */}
                 <div>
@@ -1147,13 +1185,14 @@ export default function Cotizaciones() {
                     Tipo de Destino <span className="text-red-600">*</span>
                   </label>
                   <select
-                    className="input-field"
-                    value={formConvertir.tipo_destino}
+                    className="input-field disabled:opacity-60 disabled:cursor-not-allowed"
+                    value={esContraEntregaConv ? TIPO_DESTINO.LIMA : formConvertir.tipo_destino}
                     onChange={(e) => setFormConvertir({ ...formConvertir, tipo_destino: e.target.value })}
-                    disabled={convirtiendo}
+                    disabled={convirtiendo || esContraEntregaConv}
+                    title={esContraEntregaConv ? 'La contra-entrega solo llega a Lima y Callao' : undefined}
                   >
                     <option value={TIPO_DESTINO.LIMA}>Lima</option>
-                    <option value={TIPO_DESTINO.PROVINCIA}>Provincia</option>
+                    {!esContraEntregaConv && <option value={TIPO_DESTINO.PROVINCIA}>Provincia</option>}
                   </select>
                 </div>
 
@@ -1171,7 +1210,7 @@ export default function Cotizaciones() {
                       required
                     >
                       <option value="">Seleccionar...</option>
-                      {departamentos.map((d) => (
+                      {departamentosConvertir.map((d) => (
                         <option key={d.id} value={d.id}>{d.nombre}</option>
                       ))}
                     </select>
@@ -1184,11 +1223,12 @@ export default function Cotizaciones() {
                       className="input-field"
                       value={formConvertir.provincia_id}
                       onChange={(e) => handleProvinciaChange(e.target.value)}
-                      disabled={convirtiendo || !formConvertir.departamento_id}
+                      disabled={convirtiendo || !formConvertir.departamento_id
+                        || (esContraEntregaConv && provinciasConvertir.length === 1)}
                       required
                     >
                       <option value="">{formConvertir.departamento_id ? 'Seleccionar...' : 'Elija depto.'}</option>
-                      {provincias.map((p) => (
+                      {provinciasConvertir.map((p) => (
                         <option key={p.id} value={p.id}>{p.nombre}</option>
                       ))}
                     </select>
@@ -1211,6 +1251,36 @@ export default function Cotizaciones() {
                     </select>
                   </div>
                 </div>
+
+                {formConvertir.tipo_entrega === TIPO_ENTREGA.CONTRA_ENTREGA && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-steel-200 mb-1">
+                        Dirección de entrega <span className="text-red-600">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="input-field"
+                        value={formConvertir.direccion_manual || ''}
+                        onChange={(e) => setFormConvertir({ ...formConvertir, direccion_manual: e.target.value })}
+                        placeholder="Calle, número, piso/interior y referencia"
+                        maxLength={500}
+                        disabled={convirtiendo}
+                      />
+                      <p className="text-[11px] text-steel-400 mt-1">
+                        Es a donde va el motorizado y el punto de llegada que declara la guía de remisión.
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-700">
+                      <p className="font-medium">El cliente paga al recibir el pedido</p>
+                      <p className="text-xs mt-1">
+                        Puede salir del almacén sin adelanto, con autorización de Admin o Supervisión.
+                        No genera rótulo, genera guía de remisión.
+                      </p>
+                      <p className="text-xs mt-1 font-medium">{MSG_CONTRA_ENTREGA_ZONA}</p>
+                    </div>
+                  </>
+                )}
               </>
             )}
 

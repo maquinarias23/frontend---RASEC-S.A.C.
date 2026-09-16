@@ -136,8 +136,6 @@ export default function Entregas() {
   const [archivoEntrega, setArchivoEntrega] = useState(null);
   const [previewEntrega, setPreviewEntrega] = useState(null);
   const [contrasenaEnvio, setContrasenaEnvio] = useState('');
-  const [costoFlete, setCostoFlete] = useState('');
-  const [costoPari, setCostoPari] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [confirmandoEmpaque, setConfirmandoEmpaque] = useState(false);
 
@@ -196,8 +194,6 @@ export default function Entregas() {
     setArchivoEntrega(null);
     setPreviewEntrega(null);
     setContrasenaEnvio('');
-    setCostoFlete('');
-    setCostoPari('');
     setModalEntrega(true);
   };
 
@@ -222,8 +218,6 @@ export default function Entregas() {
     const formData = new FormData();
     formData.append('archivo', archivoEntrega);
     if (requiereContrasena) formData.append('contrasena_envio', contrasenaEnvio.trim());
-    formData.append('costo_flete', costoFlete || '0');
-    formData.append('costo_parihuela', costoPari || '0');
     try {
       await api.post(`/almacen/${ventaEntrega.id}/confirmar-entrega-agencia`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(`Entrega a ${transportista?.nombre || 'agencia'} confirmada`);
@@ -460,18 +454,6 @@ export default function Entregas() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-steel-200 mb-1">Costo de flete (S/)</label>
-              <input type="number" step="0.01" min="0" className="input-field w-full" placeholder="0.00"
-                value={costoFlete} onChange={(e) => setCostoFlete(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-steel-200 mb-1">Costo de parihuela (S/)</label>
-              <input type="number" step="0.01" min="0" className="input-field w-full" placeholder="0.00"
-                value={costoPari} onChange={(e) => setCostoPari(e.target.value)} />
-            </div>
-          </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setModalEntrega(false)} className="btn-secondary" disabled={enviando}>Cancelar</button>
             <button type="submit" disabled={enviando} className="btn-primary flex items-center gap-2">

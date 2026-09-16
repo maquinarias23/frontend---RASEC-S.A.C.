@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:4000';
+import { BACKEND_URL } from '../config/apiUrl';
 
 // Patrón para detectar URLs directas de S3/Wasabi y extraer el key
 const S3_URL_PATTERN = /^https?:\/\/[^/]+\/[^/]+\/(.+)$/;

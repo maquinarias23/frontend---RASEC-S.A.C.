@@ -1,13 +1,16 @@
 import { HiX } from 'react-icons/hi';
 import { createPortal } from 'react-dom';
 
-export default function Modal({ abierto, cerrar, titulo, children, ancho = 'max-w-lg', bloquearCierre = false }) {
+// `zIndex`: solo para superponer este modal a una capa que ya está por encima
+// de z-50 (las hojas a pantalla completa de las vistas móviles). Sin él, el
+// apilado es el de siempre.
+export default function Modal({ abierto, cerrar, titulo, children, ancho = 'max-w-lg', bloquearCierre = false, zIndex }) {
   if (!abierto) return null;
 
   const handleCerrar = bloquearCierre ? undefined : cerrar;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={zIndex ? { zIndex } : undefined}>
       <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={handleCerrar} />
       <div className="flex min-h-full items-center justify-center p-4">
         <div className={`relative bg-steel-900 rounded-xl border border-steel-700/60 shadow-steel w-full ${ancho} z-10 animate-slide-up`}>

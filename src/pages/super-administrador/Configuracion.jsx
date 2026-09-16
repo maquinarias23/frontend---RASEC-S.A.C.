@@ -81,7 +81,8 @@ export default function Configuracion() {
         <div className="card">
           <h2 className="text-lg font-semibold mb-4">Comisiones de Vendedores</h2>
           <p className="text-sm text-steel-400">
-            La configuración de comisiones (rangos, ranking y metas) se gestiona desde el módulo de RRHH.
+            La política de comisiones se define en RRHH &gt; Constructor de Comisiones, y se liquida en
+            RRHH &gt; Comisiones. El ranking y las metas también se gestionan desde RRHH.
           </p>
         </div>
 
